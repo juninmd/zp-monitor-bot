@@ -1,7 +1,20 @@
 import { answerZombieQuestion } from "./agent/agent";
+import { config } from "./config";
 import { auditEvent, databaseHealth, initializeDatabase } from "./database";
 import { ingestKnowledgeDirectory, retrieveKnowledge } from "./knowledgeStore";
 import { runRconCommand } from "./rcon";
+
+async function proveTelegramDelivery(message: string): Promise<void> {
+  const response = await fetch(
+    `https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`,
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ chat_id: config.telegramChatId, text: message }),
+    },
+  );
+  if (!response.ok) throw new Error(`Telegram delivery falhou: HTTP ${response.status}`);
+}
 
 async function main(): Promise<void> {
   await initializeDatabase();
@@ -31,8 +44,11 @@ async function main(): Promise<void> {
     response: rcon.slice(0, 1000),
     status: "success",
   });
+  await proveTelegramDelivery(
+    `✅ ZP smoke: pgvector=${context.length} chunks, ADK=${answer.length} chars, RCON=${rcon.length} chars`,
+  );
   console.log(
-    `SMOKE_OK database=true pgvector_chunks=${context.length} ingested=${ingested} adk_answer_chars=${answer.length} rcon_chars=${rcon.length}`,
+    `SMOKE_OK database=true pgvector_chunks=${context.length} ingested=${ingested} adk_answer_chars=${answer.length} rcon_chars=${rcon.length} telegram=true`,
   );
 }
 
