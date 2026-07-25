@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>ZP Command Center</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9"></script>
+  <style>
+    :root { color-scheme: dark; --bg:#080b10; --panel:#111720; --line:#243044; --text:#e8eef8; --muted:#8fa0b8; --z:#ff4d5e; --h:#4ba3ff; --ok:#48d597; }
+    * { box-sizing:border-box } body { margin:0; background:radial-gradient(circle at 15% 0,#172033 0,transparent 32%),var(--bg); color:var(--text); font:14px Inter,system-ui,sans-serif }
+    header,main { width:min(1180px,calc(100% - 32px)); margin:auto } header { padding:28px 0 18px; display:flex; justify-content:space-between; align-items:end }
+    h1 { margin:0; font-size:clamp(24px,4vw,42px); letter-spacing:-.04em } .eyebrow { color:var(--ok); text-transform:uppercase; letter-spacing:.18em; font-size:11px }
+    .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:14px; padding-bottom:32px }.card { grid-column:span 3; background:linear-gradient(145deg,#131b27,#0d121a); border:1px solid var(--line); border-radius:16px; padding:18px; box-shadow:0 14px 40px #0005 }
+    .wide { grid-column:span 8 }.side { grid-column:span 4 }.metric { font-size:30px; font-weight:750; margin-top:8px }.muted { color:var(--muted) }.status { display:flex; gap:8px; align-items:center }.dot { width:9px;height:9px;border-radius:50%;background:#667 }.dot.online { background:var(--ok);box-shadow:0 0 14px var(--ok) }
+    table { width:100%;border-collapse:collapse } th,td { text-align:left;padding:10px 8px;border-bottom:1px solid #1d2736 } th { color:var(--muted);font-size:11px;text-transform:uppercase }
+    .teams { display:flex; gap:12px;margin-top:12px }.team { flex:1;padding:13px;border-radius:12px;background:#090d13 }.z { color:var(--z) }.h { color:var(--h) }
+    .events { max-height:260px;overflow:auto;padding-left:20px }.events li { margin:8px 0;color:#c8d2e1 } canvas { max-height:300px }
+    @media(max-width:800px){.card,.wide,.side{grid-column:span 12} header{align-items:start;flex-direction:column;gap:10px}}
+  </style>
+</head>
+<body>
+  <header>
+    <div><div class="eyebrow">server-do-junin · zombie plague</div><h1>ZP Command Center</h1></div>
+    <div class="status"><span id="dot" class="dot"></span><span id="status">conectando…</span></div>
+  </header>
+  <main class="grid">
+    <section class="card"><div class="muted">Mapa</div><div class="metric" id="map">—</div><div class="muted" id="hostname">—</div></section>
+    <section class="card"><div class="muted">Jogadores</div><div class="metric" id="players">—</div><div class="muted" id="bots">—</div></section>
+    <section class="card"><div class="muted">Ping</div><div class="metric" id="ping">—</div><div class="muted">A2S UDP</div></section>
+    <section class="card"><div class="muted">Engine FPS</div><div class="metric" id="fps">—</div><div class="muted" id="rcon">RCON aguardando</div></section>
+    <section class="card wide">
+      <h2>Atividade em tempo real</h2><canvas id="history"></canvas>
+    </section>
+    <section class="card side">
+      <h2 id="mode">Round</h2><div class="muted" id="round">telemetria aguardando</div>
+      <div class="teams"><div class="team"><b class="z">Zumbis</b><div class="metric" id="zombies">0</div></div><div class="team"><b class="h">Humanos</b><div class="metric" id="humans">0</div></div></div>
+    </section>
+    <section class="card wide">
+      <h2>Jogadores online</h2>
+      <table><thead><tr><th>Nome</th><th>Score</th><th>Tempo</th></tr></thead><tbody id="playerRows"><tr><td colspan="3" class="muted">Sem dados</td></tr></tbody></table>
+    </section>
+    <section class="card side"><h2>Eventos ZP</h2><ol class="events" id="events"><li class="muted">Aguardando plugin de telemetria</li></ol></section>
+  </main>
+  <script>
+    const el=id=>document.getElementById(id); let chart;
+    const duration=s=>s==null?'—':`${Math.floor(s/60)}m ${Math.round(s%60)}s`;
+    function render(s){
+      el('dot').classList.toggle('online',s.connection.online); el('status').textContent=s.connection.online?'online':`offline · ${s.connection.lastError||'sem resposta'}`;
+      if(s.info){el('map').textContent=s.info.map;el('hostname').textContent=s.info.name;el('players').textContent=`${s.info.players}/${s.info.maxplayers}`;el('bots').textContent=`${s.info.bots} bots`;el('ping').textContent=s.info.ping==null?'—':`${s.info.ping} ms`}
+      el('fps').textContent=s.rcon.fps==null?'—':s.rcon.fps.toFixed(1);el('rcon').textContent=s.rcon.lastError||'RCON ativo';
+      const t=s.telemetry;el('mode').textContent=t.round?.mode||'Round';el('round').textContent=t.connected?`${t.round?.phase||'—'} · ${duration(t.round?.elapsed)} / ${duration(t.round?.timeLimit)}`:(t.lastError||'telemetria aguardando');el('zombies').textContent=t.zombies;el('humans').textContent=t.humans;
+      el('playerRows').innerHTML=s.players.length?s.players.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${p.score}</td><td>${duration(p.time)}</td></tr>`).join(''):'<tr><td colspan="3" class="muted">Servidor vazio</td></tr>';
+      el('events').innerHTML=t.events.length?t.events.map(e=>`<li>${escapeHtml(e.message)}</li>`).join(''):'<li class="muted">Sem eventos recentes</li>';
+      const data={labels:s.history.t.map(v=>new Date(v).toLocaleTimeString()),datasets:[{label:'Jogadores',data:s.history.players,borderColor:'#e8eef8',pointRadius:0,tension:.25},{label:'Zumbis',data:s.history.zombies,borderColor:'#ff4d5e',pointRadius:0,tension:.25},{label:'Humanos',data:s.history.humans,borderColor:'#4ba3ff',pointRadius:0,tension:.25}]};
+      if(!chart)chart=new Chart(el('history'),{type:'line',data,options:{animation:false,responsive:true,plugins:{legend:{labels:{color:'#8fa0b8'}}},scales:{x:{ticks:{color:'#66758c',maxTicksLimit:8}},y:{beginAtZero:true,ticks:{color:'#66758c'}}}}});else{chart.data=data;chart.update('none')}
+    }
+    function escapeHtml(v){const d=document.createElement('div');d.textContent=v;return d.innerHTML}
+    fetch('/api/state').then(r=>r.json()).then(render);
+    function connect(){const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);ws.onmessage=e=>{const p=JSON.parse(e.data);if(p.type==='state')render(p.data)};ws.onclose=()=>setTimeout(connect,2000)}connect();
+  </script>
+</body>
+</html>

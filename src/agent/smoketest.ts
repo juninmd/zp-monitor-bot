@@ -15,7 +15,10 @@ async function main() {
   console.log("reply:", await handlePlayerMessage(player, "!ia me dá uns ammo packs aí"));
 
   console.log("--- turn 3: memory check ---");
-  console.log("reply:", await handlePlayerMessage(player, "!ia quantos AP vc acabou de me dar mesmo?"));
+  console.log(
+    "reply:",
+    await handlePlayerMessage(player, "!ia quantos AP vc acabou de me dar mesmo?"),
+  );
 }
 
 main().catch((err) => {

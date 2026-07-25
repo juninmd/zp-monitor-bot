@@ -1,7 +1,14 @@
 import { config } from "./config";
 
 const MIN_INTERVAL_MS = 1200;
-const queue: string[] = [];
+interface QueueItem {
+  chatId: string;
+  text: string;
+  html: boolean;
+  resolve: () => void;
+}
+
+const queue: QueueItem[] = [];
 let draining = false;
 
 const escapeHtml = (s: string): string =>
@@ -11,7 +18,8 @@ async function drain(): Promise<void> {
   if (draining) return;
   draining = true;
   while (queue.length > 0) {
-    const text = queue.shift()!;
+    const item = queue.shift();
+    if (!item) break;
     try {
       const res = await fetch(
         `https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`,
@@ -19,9 +27,9 @@ async function drain(): Promise<void> {
           method: "POST",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            chat_id: config.telegramChatId,
-            text,
-            parse_mode: "HTML",
+            chat_id: item.chatId,
+            text: item.text,
+            ...(item.html ? { parse_mode: "HTML" } : {}),
             disable_web_page_preview: true,
           }),
         },
@@ -32,14 +40,21 @@ async function drain(): Promise<void> {
     } catch (err) {
       console.error("[telegram] send error", err);
     }
+    item.resolve();
     await new Promise((r) => setTimeout(r, MIN_INTERVAL_MS));
   }
   draining = false;
 }
 
 export function sendTelegram(text: string): void {
-  queue.push(text);
-  void drain();
+  void sendTelegramTo(config.telegramChatId, text, true);
+}
+
+export function sendTelegramTo(chatId: string, text: string, html = false): Promise<void> {
+  return new Promise((resolve) => {
+    queue.push({ chatId, text, html, resolve });
+    void drain();
+  });
 }
 
 export async function sendTelegramPhoto(photo: Buffer, caption?: string): Promise<void> {
@@ -49,10 +64,10 @@ export async function sendTelegramPhoto(photo: Buffer, caption?: string): Promis
   form.append("photo", new Blob([photo], { type: "image/png" }), "radar.png");
 
   try {
-    const res = await fetch(
-      `https://api.telegram.org/bot${config.telegramBotToken}/sendPhoto`,
-      { method: "POST", body: form },
-    );
+    const res = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendPhoto`, {
+      method: "POST",
+      body: form,
+    });
     if (!res.ok) {
       console.error("[telegram] sendPhoto failed", res.status, await res.text());
     }
