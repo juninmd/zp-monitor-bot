@@ -1,10 +1,10 @@
-import { sendTelegram, sendTelegramPhoto, escapeHtml } from "./telegram";
-import { playerConnected, playerDisconnected, getStats } from "./state";
-import type { LogEvent } from "./logParser";
-import { getPositions, getSnapshot, runRconCommand } from "./rcon";
-import { renderRadar } from "./radar";
-import { config } from "./config";
 import { handlePlayerMessage, sanitizeChatReply } from "./agent/agent";
+import { config } from "./config";
+import type { LogEvent } from "./logParser";
+import { renderRadar } from "./radar";
+import { getPositions, getSnapshot, runRconCommand } from "./rcon";
+import { getStats, playerConnected, playerDisconnected } from "./state";
+import { escapeHtml, sendTelegram, sendTelegramPhoto } from "./telegram";
 
 function formatDuration(seconds: number): string {
   const h = Math.floor(seconds / 3600);
@@ -103,11 +103,7 @@ export async function sendPeriodicStats(): Promise<void> {
   try {
     const players = await getPositions();
     const png = renderRadar(players);
-    if (png)
-      await sendTelegramPhoto(
-        png,
-        "🗺️ Radar (posição + direção)\n🔴▲ zumbi  🔵● humano",
-      );
+    if (png) await sendTelegramPhoto(png, "🗺️ Radar (posição + direção)\n🔴▲ zumbi  🔵● humano");
   } catch (err) {
     console.error("[radar] failed", err);
   }

@@ -1,5 +1,5 @@
-import { BaseLlm, type BaseLlmConnection } from "@google/adk";
 import type { LlmRequest, LlmResponse } from "@google/adk";
+import { BaseLlm, type BaseLlmConnection } from "@google/adk";
 import type { Content, FunctionDeclaration, Schema } from "@google/genai";
 
 /**
@@ -44,7 +44,9 @@ export class LiteLlmOpenAi extends BaseLlm {
 
     if (!res.ok) {
       const body = await res.text();
-      throw new Error(`LiteLLM ${this.model} request failed (${res.status}): ${body.slice(0, 500)}`);
+      throw new Error(
+        `LiteLLM ${this.model} request failed (${res.status}): ${body.slice(0, 500)}`,
+      );
     }
 
     const data = (await res.json()) as OpenAiChatCompletion;
@@ -98,29 +100,34 @@ function buildMessages(llmRequest: LlmRequest): unknown[] {
   const messages: unknown[] = [];
 
   const sysInstruction = llmRequest.config?.systemInstruction;
-  const sysText = typeof sysInstruction === "string" ? sysInstruction : extractText(sysInstruction as Content | undefined);
+  const sysText =
+    typeof sysInstruction === "string"
+      ? sysInstruction
+      : extractText(sysInstruction as Content | undefined);
   if (sysText) messages.push({ role: "system", content: sysText });
 
   for (const content of llmRequest.contents) {
     const role = content.role === "model" ? "assistant" : "user";
     const toolCalls = (content.parts ?? [])
-      .filter((p) => p.functionCall)
-      .map((p) => ({
-        id: p.functionCall!.id ?? p.functionCall!.name ?? "call",
+      .flatMap((part) => (part.functionCall ? [part.functionCall] : []))
+      .map((call) => ({
+        id: call.id ?? call.name ?? "call",
         type: "function",
         function: {
-          name: p.functionCall!.name,
-          arguments: JSON.stringify(p.functionCall!.args ?? {}),
+          name: call.name,
+          arguments: JSON.stringify(call.args ?? {}),
         },
       }));
 
-    const functionResponses = (content.parts ?? []).filter((p: { functionResponse?: unknown }) => p.functionResponse);
+    const functionResponses = (content.parts ?? []).flatMap((part) =>
+      part.functionResponse ? [part.functionResponse] : [],
+    );
     if (functionResponses.length > 0) {
-      for (const p of functionResponses) {
+      for (const response of functionResponses) {
         messages.push({
           role: "tool",
-          tool_call_id: p.functionResponse!.id ?? p.functionResponse!.name ?? "call",
-          content: JSON.stringify(p.functionResponse!.response ?? {}),
+          tool_call_id: response.id ?? response.name ?? "call",
+          content: JSON.stringify(response.response ?? {}),
         });
       }
       continue;
@@ -155,7 +162,9 @@ function buildTools(llmRequest: LlmRequest): unknown[] {
       function: {
         name: decl.name,
         description: decl.description,
-        parameters: decl.parameters ? geminiSchemaToJsonSchema(decl.parameters) : { type: "object", properties: {} },
+        parameters: decl.parameters
+          ? geminiSchemaToJsonSchema(decl.parameters)
+          : { type: "object", properties: {} },
       },
     }));
 }

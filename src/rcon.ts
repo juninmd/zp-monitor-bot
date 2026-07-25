@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { goldsrcRcon } from "./goldsrcRcon";
 
 export interface RadarPlayer {
   team: "z" | "h";
@@ -42,10 +43,15 @@ export async function getSnapshot(): Promise<Snapshot | null> {
 
   const events: SnapshotEvent[] = [];
   for (const m of raw.matchAll(EVENT_RE)) {
-    events.push({ kind: m[1], message: m[2], t: Number(m[3]) });
+    events.push({ kind: m[1] ?? "", message: m[2] ?? "", t: Number(m[3]) });
   }
   return {
-    round: { phase: rm[1], mode: rm[2], elapsed: Number(rm[3]), timeLimit: Number(rm[4]) },
+    round: {
+      phase: rm[1] ?? "",
+      mode: rm[2] ?? "",
+      elapsed: Number(rm[3]),
+      timeLimit: Number(rm[4]),
+    },
     zombies: Number(cm[1]),
     humans: Number(cm[2]),
     events,
@@ -67,19 +73,13 @@ export async function getPositions(): Promise<RadarPlayer[]> {
   return players;
 }
 
-/**
- * Runs an arbitrary server console command over RCON via rcon.ps1.
- * `cmd` is passed as a single Bun.spawn arg (no shell involved), but the
- * HLDS console itself splits on `;` and doesn't strip quotes the way a shell
- * would - callers must sanitize any player-controlled text before it lands
- * here (see src/agent/tools.ts).
- */
 export async function runRconCommand(cmd: string): Promise<string> {
-  const proc = Bun.spawn(
-    ["pwsh", "-NoProfile", "-File", config.rconScriptPath, "-Cmd", cmd],
-    { stdout: "pipe", stderr: "pipe" },
+  if (!config.rconPassword) throw new Error("RCON_PASSWORD não configurado");
+  return goldsrcRcon(
+    config.serverHost,
+    config.serverPort,
+    config.rconPassword,
+    cmd,
+    config.rconTimeoutMs,
   );
-  const raw = await new Response(proc.stdout).text();
-  await proc.exited;
-  return raw;
 }

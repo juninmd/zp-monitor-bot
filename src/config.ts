@@ -4,24 +4,41 @@ const required = (name: string): string => {
   return v;
 };
 
+const positiveNumber = (name: string, fallback: string): number => {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isFinite(value) || value <= 0) {
+    throw new Error(`${name} must be a positive number`);
+  }
+  return value;
+};
+
 export const config = {
   telegramBotToken: required("TELEGRAM_BOT_TOKEN"),
   telegramChatId: required("TELEGRAM_CHAT_ID"),
   namespace: process.env.K8S_NAMESPACE ?? "server-do-junin",
   podSelector: process.env.K8S_POD_SELECTOR ?? "app=cs16-server",
   container: process.env.K8S_CONTAINER ?? "cs16-server",
-  statsIntervalMin: Number(process.env.STATS_INTERVAL_MIN ?? "30"),
-  port: Number(process.env.PORT ?? "8091"),
-  rconScriptPath:
-    process.env.RCON_SCRIPT_PATH ??
-    "../.claude/skills/cs16-server-admin/scripts/rcon.ps1",
+  logTailEnabled: (process.env.LOG_TAIL_ENABLED ?? "true") !== "false",
+  telegramPollingEnabled: (process.env.TELEGRAM_POLLING_ENABLED ?? "true") !== "false",
+  statsIntervalMin: positiveNumber("STATS_INTERVAL_MIN", "30"),
+  port: positiveNumber("PORT", "8091"),
+  serverHost: process.env.SERVER_HOST ?? "cs16-server-udp.server-do-junin.svc.cluster.local",
+  serverPort: positiveNumber("SERVER_PORT", "27015"),
+  pollIntervalMs: positiveNumber("POLL_INTERVAL_MS", "3000"),
+  rconIntervalMs: positiveNumber("RCON_INTERVAL_MS", "5000"),
+  rconTimeoutMs: positiveNumber("RCON_TIMEOUT_MS", "3000"),
+  historyLength: positiveNumber("HISTORY_LENGTH", "720"),
+  rconPassword: process.env.RCON_PASSWORD ?? "",
+  databaseUrl: process.env.DATABASE_URL ?? "",
+  knowledgeDir: process.env.KNOWLEDGE_DIR ?? "./knowledge",
 
   agentEnabled: (process.env.AGENT_ENABLED ?? "true") !== "false",
   // LLM served by our own LiteLLM proxy (OpenAI-compatible /v1/chat/completions),
   // not a personal API key. Tries models in order and sticks with the first
   // that works: NVIDIA (NIM) first, then Ollama Cloud, Gemini/Gemma only last.
   litellmApiKey: process.env.LITELLM_API_KEY ?? "",
-  litellmBaseUrl: process.env.LITELLM_BASE_URL ?? "https://litellm.antonio-code.duckdns.org/v1",
+  litellmBaseUrl: process.env.LITELLM_BASE_URL ?? "http://litellm.ai.svc.cluster.local:4000/v1",
+  embeddingModel: process.env.EMBEDDING_MODEL ?? "nomic-embed-text",
   agentModels: (
     process.env.AGENT_MODELS ?? "cloud/nemotron-super-49b,cloud/ollama-nemotron-ultra,cloud/gemma3"
   )
@@ -34,9 +51,9 @@ export const config = {
     process.env.AGENT_TRIGGER_REGEX ?? "^!(ia|bot|admin)\\b|\\bbot\\b",
     "i",
   ),
-  agentSessionTtlMin: Number(process.env.AGENT_SESSION_TTL_MIN ?? "20"),
-  agentAmmoCooldownMin: Number(process.env.AGENT_AMMO_COOLDOWN_MIN ?? "5"),
-  agentAmmoMaxAmount: Number(process.env.AGENT_AMMO_MAX_AMOUNT ?? "30"),
-  agentRespawnCooldownMin: Number(process.env.AGENT_RESPAWN_COOLDOWN_MIN ?? "2"),
-  agentMapChangeCooldownMin: Number(process.env.AGENT_MAP_CHANGE_COOLDOWN_MIN ?? "10"),
+  agentSessionTtlMin: positiveNumber("AGENT_SESSION_TTL_MIN", "20"),
+  agentAmmoCooldownMin: positiveNumber("AGENT_AMMO_COOLDOWN_MIN", "5"),
+  agentAmmoMaxAmount: positiveNumber("AGENT_AMMO_MAX_AMOUNT", "30"),
+  agentRespawnCooldownMin: positiveNumber("AGENT_RESPAWN_COOLDOWN_MIN", "2"),
+  agentMapChangeCooldownMin: positiveNumber("AGENT_MAP_CHANGE_COOLDOWN_MIN", "10"),
 };
