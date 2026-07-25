@@ -117,7 +117,7 @@ export async function handleTelegramText(
   });
   try {
     const context = await retrieveKnowledge(parsed.question);
-    const answer = await answerZombieQuestion(chatId, parsed.question, context);
+    const answer = await answerZombieQuestion(chatId, parsed.question, context, actor);
     if (!answer) throw new Error("todos os modelos LiteLLM falharam");
     await auditEvent({
       chatId,

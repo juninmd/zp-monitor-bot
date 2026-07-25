@@ -18,8 +18,25 @@ export interface PlayerCtx {
   steamId: string;
 }
 
+interface PlayerToolDependencies {
+  runRcon: typeof runRconCommand;
+  notify: typeof sendTelegram;
+  consume: typeof tryConsume;
+  cooldownRemaining: typeof remainingMin;
+}
+
+const productionDependencies: PlayerToolDependencies = {
+  runRcon: runRconCommand,
+  notify: sendTelegram,
+  consume: tryConsume,
+  cooldownRemaining: remainingMin,
+};
+
 /** Builds the allowlisted admin tools, bound to the player who is chatting. */
-export function buildToolsForPlayer(player: PlayerCtx): FunctionTool[] {
+export function buildToolsForPlayer(
+  player: PlayerCtx,
+  dependencies: PlayerToolDependencies = productionDependencies,
+): FunctionTool[] {
   // amx_* commands take the in-game name; a quoted exact-name target is safer
   // than uid against a stale/duplicated slot, and avoids letting the LLM name
   // an arbitrary other player (only this sender's own name is ever used).
@@ -31,14 +48,16 @@ export function buildToolsForPlayer(player: PlayerCtx): FunctionTool[] {
       "Ressuscita/respawna o jogador que está pedindo ajuda no chat (ele mesmo), caso esteja morto/travado esperando o round. Só funciona se ele estiver morto e num time válido.",
     execute: async () => {
       const key = `respawn:${player.steamId}`;
-      if (!tryConsume(key, config.agentRespawnCooldownMin)) {
+      if (!dependencies.consume(key, config.agentRespawnCooldownMin)) {
         return {
           ok: false,
-          reason: `cooldown, tente de novo em ${remainingMin(key, config.agentRespawnCooldownMin)} min`,
+          reason: `cooldown, tente de novo em ${dependencies.cooldownRemaining(key, config.agentRespawnCooldownMin)} min`,
         };
       }
-      const out = await runRconCommand(`zp_respawn "${safeName}"`);
-      sendTelegram(`🤖 IA respawnou <b>${escapeHtml(player.name)}</b> a pedido dele no chat.`);
+      const out = await dependencies.runRcon(`zp_respawn "${safeName}"`);
+      dependencies.notify(
+        `🤖 IA respawnou <b>${escapeHtml(player.name)}</b> a pedido dele no chat.`,
+      );
       return { ok: true, rconOutput: out.trim().slice(0, 200) };
     },
   });
@@ -57,15 +76,15 @@ export function buildToolsForPlayer(player: PlayerCtx): FunctionTool[] {
     }),
     execute: async ({ amount }) => {
       const key = `ammo:${player.steamId}`;
-      if (!tryConsume(key, config.agentAmmoCooldownMin)) {
+      if (!dependencies.consume(key, config.agentAmmoCooldownMin)) {
         return {
           ok: false,
-          reason: `cooldown, tente de novo em ${remainingMin(key, config.agentAmmoCooldownMin)} min`,
+          reason: `cooldown, tente de novo em ${dependencies.cooldownRemaining(key, config.agentAmmoCooldownMin)} min`,
         };
       }
       const clamped = Math.min(Math.max(1, Math.round(amount)), config.agentAmmoMaxAmount);
-      const out = await runRconCommand(`zp_give_ammo "${safeName}" ${clamped}`);
-      sendTelegram(
+      const out = await dependencies.runRcon(`zp_give_ammo "${safeName}" ${clamped}`);
+      dependencies.notify(
         `🤖 IA deu <b>${clamped} AP</b> para <b>${escapeHtml(player.name)}</b> a pedido dele no chat.`,
       );
       return { ok: true, amount: clamped, rconOutput: out.trim().slice(0, 200) };
@@ -78,14 +97,14 @@ export function buildToolsForPlayer(player: PlayerCtx): FunctionTool[] {
       "Dá um leve empurrão (sem dano) no jogador que está pedindo ajuda no chat (ele mesmo), útil quando ele está preso/travado na geometria do mapa.",
     execute: async () => {
       const key = `unstick:${player.steamId}`;
-      if (!tryConsume(key, config.agentRespawnCooldownMin)) {
+      if (!dependencies.consume(key, config.agentRespawnCooldownMin)) {
         return {
           ok: false,
-          reason: `cooldown, tente de novo em ${remainingMin(key, config.agentRespawnCooldownMin)} min`,
+          reason: `cooldown, tente de novo em ${dependencies.cooldownRemaining(key, config.agentRespawnCooldownMin)} min`,
         };
       }
-      const out = await runRconCommand(`amx_slap "${safeName}" 0`);
-      sendTelegram(
+      const out = await dependencies.runRcon(`amx_slap "${safeName}" 0`);
+      dependencies.notify(
         `🤖 IA deu um "slap" (destravar) em <b>${escapeHtml(player.name)}</b> a pedido dele no chat.`,
       );
       return { ok: true, rconOutput: out.trim().slice(0, 200) };
@@ -101,18 +120,18 @@ export function buildToolsForPlayer(player: PlayerCtx): FunctionTool[] {
     }),
     execute: async ({ mapName }) => {
       const key = "map-change";
-      if (!tryConsume(key, config.agentMapChangeCooldownMin)) {
+      if (!dependencies.consume(key, config.agentMapChangeCooldownMin)) {
         return {
           ok: false,
-          reason: `cooldown global, tente de novo em ${remainingMin(key, config.agentMapChangeCooldownMin)} min`,
+          reason: `cooldown global, tente de novo em ${dependencies.cooldownRemaining(key, config.agentMapChangeCooldownMin)} min`,
         };
       }
       const safeMap = sanitizeToken(mapName, 32);
       if (safeMap.length < 3) {
         return { ok: false, reason: "nome de mapa inválido" };
       }
-      const out = await runRconCommand(`changelevel ${safeMap}`);
-      sendTelegram(
+      const out = await dependencies.runRcon(`changelevel ${safeMap}`);
+      dependencies.notify(
         `🤖 IA trocou o mapa para <b>${escapeHtml(safeMap)}</b> a pedido de <b>${escapeHtml(player.name)}</b> no chat.`,
       );
       return { ok: true, mapName: safeMap, rconOutput: out.trim().slice(0, 200) };
