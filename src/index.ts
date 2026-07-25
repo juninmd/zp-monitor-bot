@@ -1,3 +1,4 @@
+import { timingSafeEqual } from "node:crypto";
 import { Elysia } from "elysia";
 import { config } from "./config";
 import { databaseHealth, initializeDatabase } from "./database";
@@ -8,10 +9,19 @@ import { handleEvent, sendPeriodicStats } from "./notifier";
 import { runRconCommand } from "./rcon";
 import { getStats } from "./state";
 import { sendTelegram } from "./telegram";
-import { startTelegramBot } from "./telegramBot";
+import { handleTelegramText, startTelegramBot } from "./telegramBot";
 
 let ready = false;
 let knowledgeChunks = 0;
+
+function authorized(request: Request): boolean {
+  const provided = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
+  const expected = config.telegramBotToken;
+  return (
+    provided.length === expected.length &&
+    timingSafeEqual(Buffer.from(provided), Buffer.from(expected))
+  );
+}
 
 const app = new Elysia()
   .get("/", () => Bun.file("public/index.html"))
@@ -23,6 +33,28 @@ const app = new Elysia()
   })
   .get("/stats", () => getStats())
   .get("/api/state", () => monitorState)
+  .post("/api/telegram", async ({ body, request, set }) => {
+    if (!authorized(request)) {
+      set.status = 401;
+      return { error: "unauthorized" };
+    }
+    if (
+      !body ||
+      typeof body !== "object" ||
+      !("text" in body) ||
+      typeof body.text !== "string" ||
+      !body.text.trim()
+    ) {
+      set.status = 400;
+      return { error: "text is required" };
+    }
+    const chatId =
+      "chatId" in body && typeof body.chatId === "string" ? body.chatId : config.telegramChatId;
+    const actor = "actor" in body && typeof body.actor === "string" ? body.actor : "telegram-hub";
+    return {
+      reply: await handleTelegramText(body.text.slice(0, 1000), chatId, actor.slice(0, 100)),
+    };
+  })
   .ws("/ws", {
     open(ws) {
       ws.subscribe("state");

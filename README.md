@@ -15,12 +15,16 @@ Google ADK via LiteLLM, RAG com pgvector e integração Telegram com auditoria.
 
 ## Telegram
 
+- Em produção, o `megabrain` é o único consumidor de `getUpdates` e encaminha
+  os comandos namespaced ao endpoint interno autenticado deste serviço.
 - `/status` ou `/players`: mapa, jogadores e telemetria.
 - `/ask <pergunta>` ou texto livre: resposta ADK com contexto recuperado do
   pgvector.
 - `/rcon status|stats|users|zp_telemetry_snapshot`: comando remoto auditado.
 - `/map <nome>`: troca de mapa auditada.
 - `/audit`: últimas ações.
+- No bot compartilhado, use `/zp`, `/zpstatus`, `/zprcon`, `/zpmap` e
+  `/zpaudit`.
 
 ## Desenvolvimento
 

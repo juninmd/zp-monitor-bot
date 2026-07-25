@@ -52,35 +52,21 @@ function statusText(): string {
     .join("\n");
 }
 
-async function handleUpdate(update: TelegramUpdate): Promise<void> {
-  const message = update.message;
-  if (!message?.text) return;
-  const chatId = String(message.chat.id);
-  const actor = actorName(update);
-  if (chatId !== config.telegramChatId) {
-    await auditEvent({
-      chatId,
-      actor,
-      action: "security",
-      request: message.text.slice(0, 1000),
-      response: "chat não autorizado",
-      status: "denied",
-    });
-    return;
-  }
-
-  const parsed = parseTelegramCommand(message.text);
+export async function handleTelegramText(
+  text: string,
+  chatId: string,
+  actor: string,
+): Promise<string> {
+  const parsed = parseTelegramCommand(text);
   if (parsed.kind === "help" || parsed.kind === "unknown") {
-    await sendTelegramTo(chatId, HELP);
-    return;
+    return HELP;
   }
   if (parsed.kind === "status") {
-    await sendTelegramTo(chatId, statusText());
-    return;
+    return statusText();
   }
   if (parsed.kind === "audit") {
     const rows = await recentAudit();
-    const text = rows.length
+    return rows.length
       ? rows
           .map(
             (row) =>
@@ -88,8 +74,6 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
           )
           .join("\n")
       : "Auditoria vazia.";
-    await sendTelegramTo(chatId, text);
-    return;
   }
   if (parsed.kind === "rcon") {
     await auditEvent({
@@ -109,7 +93,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
         response: output,
         status: "success",
       });
-      await sendTelegramTo(chatId, `✅ ${parsed.command}\n${output || "(sem saída)"}`);
+      return `✅ ${parsed.command}\n${output || "(sem saída)"}`;
     } catch (error) {
       const response = error instanceof Error ? error.message : String(error);
       await auditEvent({
@@ -120,9 +104,8 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
         response,
         status: "failed",
       });
-      await sendTelegramTo(chatId, `❌ ${parsed.command}: ${response}`);
+      return `❌ ${parsed.command}: ${response}`;
     }
-    return;
   }
 
   await auditEvent({
@@ -145,7 +128,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
       status: "success",
       metadata: { retrievedChunks: context.length, model: config.agentModels[0] },
     });
-    await sendTelegramTo(chatId, `🧟 ${answer}`);
+    return `🧟 ${answer}`;
   } catch (error) {
     const response = error instanceof Error ? error.message : String(error);
     await auditEvent({
@@ -156,8 +139,27 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
       response,
       status: "failed",
     });
-    await sendTelegramTo(chatId, `❌ Não consegui responder agora: ${response}`);
+    return `❌ Não consegui responder agora: ${response}`;
   }
+}
+
+async function handleUpdate(update: TelegramUpdate): Promise<void> {
+  const message = update.message;
+  if (!message?.text) return;
+  const chatId = String(message.chat.id);
+  const actor = actorName(update);
+  if (chatId !== config.telegramChatId) {
+    await auditEvent({
+      chatId,
+      actor,
+      action: "security",
+      request: message.text.slice(0, 1000),
+      response: "chat não autorizado",
+      status: "denied",
+    });
+    return;
+  }
+  await sendTelegramTo(chatId, await handleTelegramText(message.text, chatId, actor));
 }
 
 export async function startTelegramBot(): Promise<void> {
