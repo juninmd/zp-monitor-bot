@@ -56,7 +56,18 @@ async function runKubectlOnce(onEvent: (event: LogEvent) => void): Promise<void>
 }
 
 interface PodList {
-  items: Array<{ metadata: { name: string } }>;
+  items: Array<{
+    metadata: { name: string; creationTimestamp?: string; deletionTimestamp?: string };
+    status?: { phase?: string };
+  }>;
+}
+
+export function selectLogPod(pods: PodList["items"]): string | undefined {
+  return pods
+    .filter((pod) => !pod.metadata.deletionTimestamp && pod.status?.phase === "Running")
+    .sort((a, b) =>
+      (b.metadata.creationTimestamp ?? "").localeCompare(a.metadata.creationTimestamp ?? ""),
+    )[0]?.metadata.name;
 }
 
 async function runKubernetesApiOnce(onEvent: (event: LogEvent) => void): Promise<void> {
@@ -74,7 +85,7 @@ async function runKubernetesApiOnce(onEvent: (event: LogEvent) => void): Promise
   );
   if (!listResponse.ok) throw new Error(`Kubernetes pods HTTP ${listResponse.status}`);
   const pods = (await listResponse.json()) as PodList;
-  const podName = pods.items[0]?.metadata.name;
+  const podName = selectLogPod(pods.items);
   if (!podName) throw new Error(`nenhum pod encontrado para ${config.podSelector}`);
   const logResponse = await fetch(
     `${base}/api/v1/namespaces/${encodeURIComponent(config.namespace)}/pods/${encodeURIComponent(podName)}/log?container=${encodeURIComponent(config.container)}&follow=true&tailLines=0`,
