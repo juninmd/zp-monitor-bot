@@ -35,7 +35,9 @@ async function main(): Promise<void> {
     metadata: { contextChunks: context.length },
   });
   const rcon = await runRconCommand("status");
-  if (!rcon.trim()) throw new Error("RCON status sem resposta");
+  if (!rcon.trim() || /bad rcon_password|invalid password/i.test(rcon)) {
+    throw new Error("RCON status sem autenticação válida");
+  }
   await auditEvent({
     chatId: "smoke",
     actor: "smoke-test",
