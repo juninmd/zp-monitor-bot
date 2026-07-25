@@ -63,8 +63,11 @@ async function runAgentTurn(
         }
       }
 
+      if (!reply) {
+        console.error(`[agent] model ${modelName} returned no final text, trying next`);
+        continue;
+      }
       workingModelIdx = i;
-      if (!reply) return null;
       return reply.length > maxReplyChars ? `${reply.slice(0, maxReplyChars - 1)}…` : reply;
     } catch (err) {
       console.error(`[agent] model ${modelName} failed, trying next`, err);
