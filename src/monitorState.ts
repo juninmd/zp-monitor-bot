@@ -1,11 +1,16 @@
 import { GameDig, type QueryResult } from "gamedig";
 import type { Snapshot } from "./rcon";
+import { parseStatus, type StatusClient, splitByStatus } from "./statusParser";
 
 interface MonitorPlayer {
   name: string;
   score: number;
   time: number | null;
 }
+
+// A `status` table older than this is ignored: bots churn with the quota, and
+// a stale table would label a fresh human as a bot (or the reverse).
+const STATUS_MAX_AGE_MS = 30_000;
 
 interface MonitorState {
   connection: { online: boolean; lastError: string | null; lastUpdate: number | null };
@@ -18,7 +23,10 @@ interface MonitorState {
     password: boolean;
     ping: number | null;
   } | null;
+  /** Real players only. Bots are filtered out via the RCON `status` table. */
   players: MonitorPlayer[];
+  /** How the split above was decided, so the UI can flag a degraded reading. */
+  playersSource: "status" | "heuristic";
   rcon: {
     supported: boolean;
     fps: number | null;
@@ -57,6 +65,7 @@ export const monitorState: MonitorState = {
   connection: { online: false, lastError: null, lastUpdate: null },
   info: null,
   players: [],
+  playersSource: "heuristic",
   rcon: { supported: false, fps: null, lastUpdate: null, lastError: null },
   telemetry: {
     connected: false,
@@ -69,9 +78,15 @@ export const monitorState: MonitorState = {
   history: { t: [], players: [], zombies: [], humans: [], ping: [] },
 };
 
+// "CPU   In    Out   Uptime  Users   FPS    Players"
+// "17.50  0.00  0.00      45     12  786.24        0"
+// FPS is the 6th column, not the 1st - reading the 1st reported CPU% as if it
+// were the engine framerate (17 instead of 786), which reads as a dying server.
+const STATS_ROW_RE = /^\s*([\d.]+)\s+([\d.]+)\s+([\d.]+)\s+(\d+)\s+(\d+)\s+([\d.]+)\s+(\d+)\s*$/m;
+
 export function parseStatsFps(text: string): number | null {
-  const match = text.match(/^\s*([\d.]+)\s/m);
-  return match ? Number(match[1]) : null;
+  const match = text.match(STATS_ROW_RE);
+  return match ? Number(match[6]) : null;
 }
 
 function errorMessage(error: unknown): string {
@@ -91,6 +106,41 @@ function pushHistory(cap: number): void {
   history.zombies = history.zombies.slice(-cap);
   history.humans = history.humans.slice(-cap);
   history.ping = history.ping.slice(-cap);
+}
+
+let lastStatus: { clients: StatusClient[]; at: number } | null = null;
+
+function toMonitorPlayer(player: QueryResult["players"][number]): MonitorPlayer {
+  const raw = player.raw as Record<string, unknown> | undefined;
+  return {
+    name: player.name || "(sem nome)",
+    score: typeof raw?.score === "number" ? raw.score : (player.score ?? 0),
+    time: typeof raw?.time === "number" ? raw.time : null,
+  };
+}
+
+/**
+ * GameDig knows HOW MANY bots there are (A2S_INFO carries the count) but not
+ * WHICH ones: on GoldSrc it guesses by assuming the longest-connected clients
+ * are the bots. Here that is backwards - the bots are recreated on every map
+ * change while a real player's timer keeps running, so anyone who stays
+ * through one map change is the oldest client on the server and gets labelled
+ * a bot, with a bot promoted to "player" in their place.
+ *
+ * The RCON `status` table carries the actual BOT / STEAM_x id per client, so
+ * use it whenever it is fresh and complete, and only fall back to GameDig's
+ * guess when RCON is down.
+ */
+function resolvePlayers(result: QueryResult): {
+  players: MonitorPlayer[];
+  source: MonitorState["playersSource"];
+} {
+  const listed = [...result.players, ...result.bots].map(toMonitorPlayer);
+  const fresh =
+    lastStatus && Date.now() - lastStatus.at <= STATUS_MAX_AGE_MS ? lastStatus.clients : [];
+  const split = splitByStatus(listed, fresh);
+  if (split) return { players: split.humans, source: "status" };
+  return { players: result.players.map(toMonitorPlayer), source: "heuristic" };
 }
 
 async function pollA2s(options: MonitorOptions, broadcast: () => void): Promise<void> {
@@ -113,14 +163,9 @@ async function pollA2s(options: MonitorOptions, broadcast: () => void): Promise<
       password: result.password,
       ping: result.ping ?? null,
     };
-    monitorState.players = result.players.map((player) => {
-      const raw = player.raw as Record<string, unknown> | undefined;
-      return {
-        name: player.name || "(sem nome)",
-        score: typeof raw?.score === "number" ? raw.score : (player.score ?? 0),
-        time: typeof raw?.time === "number" ? raw.time : null,
-      };
-    });
+    const resolved = resolvePlayers(result);
+    monitorState.players = resolved.players;
+    monitorState.playersSource = resolved.source;
   } catch (error) {
     monitorState.connection.online = false;
     monitorState.connection.lastError = errorMessage(error);
@@ -134,6 +179,7 @@ async function pollA2s(options: MonitorOptions, broadcast: () => void): Promise<
 async function pollRcon(runRcon: RconRunner, broadcast: () => void): Promise<void> {
   try {
     monitorState.rcon.fps = parseStatsFps(await runRcon("stats"));
+    lastStatus = { clients: parseStatus(await runRcon("status")), at: Date.now() };
     monitorState.rcon.lastError = null;
   } catch (error) {
     monitorState.rcon.lastError = errorMessage(error);

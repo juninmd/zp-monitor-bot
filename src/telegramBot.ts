@@ -39,7 +39,7 @@ function statusText(): string {
   return [
     monitorState.connection.online ? "🟢 Servidor online" : "🔴 Servidor offline",
     info
-      ? `Mapa: ${info.map} | Jogadores: ${info.players}/${info.maxplayers} | Ping: ${info.ping ?? "—"} ms`
+      ? `Mapa: ${info.map} | Jogadores reais: ${info.players}/${info.maxplayers} (+${info.bots} bots) | Ping: ${info.ping ?? "—"} ms`
       : null,
     telemetry.connected
       ? `Modo: ${telemetry.round?.mode ?? "—"} | 🧟 ${telemetry.zombies} x 🧍 ${telemetry.humans}`
