@@ -6,7 +6,7 @@ export const database = config.databaseUrl ? new SQL(config.databaseUrl) : null;
 export interface AuditEvent {
   chatId: string;
   actor: string;
-  action: "question" | "command" | "security";
+  action: "question" | "command" | "security" | "knowledge";
   request: string;
   response?: string;
   status: "started" | "success" | "denied" | "failed";
@@ -35,7 +35,7 @@ export async function initializeDatabase(): Promise<void> {
       id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
       chat_id text NOT NULL,
       actor text NOT NULL,
-      action text NOT NULL CHECK (action IN ('question', 'command', 'security')),
+      action text NOT NULL CHECK (action IN ('question', 'command', 'security', 'knowledge')),
       request text NOT NULL,
       response text,
       status text NOT NULL CHECK (status IN ('started', 'success', 'denied', 'failed')),
@@ -43,6 +43,29 @@ export async function initializeDatabase(): Promise<void> {
       created_at timestamptz NOT NULL DEFAULT now()
     )
   `;
+  await database`ALTER TABLE audit_events DROP CONSTRAINT IF EXISTS audit_events_action_check`;
+  await database`
+    ALTER TABLE audit_events
+    ADD CONSTRAINT audit_events_action_check
+    CHECK (action IN ('question', 'command', 'security', 'knowledge'))
+  `;
+  // Uma linha por conexão de jogador real. É o que permite dizer "primeira vez
+  // aqui" / "6ª visita" na notificação, e é a única fonte durável de retenção -
+  // os logs do HLDS ficam num PVC de 1Gi que rotaciona.
+  await database`
+    CREATE TABLE IF NOT EXISTS player_sessions (
+      id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+      steam_id text NOT NULL,
+      name text NOT NULL,
+      ip text NOT NULL,
+      connected_at timestamptz NOT NULL DEFAULT now(),
+      disconnected_at timestamptz,
+      duration_seconds integer,
+      reason text
+    )
+  `;
+  await database`CREATE INDEX IF NOT EXISTS player_sessions_steam_id_idx ON player_sessions (steam_id, connected_at DESC)`;
+  await database`CREATE INDEX IF NOT EXISTS player_sessions_connected_at_idx ON player_sessions (connected_at DESC)`;
   await database`CREATE INDEX IF NOT EXISTS audit_events_created_at_idx ON audit_events (created_at DESC)`;
   await database`CREATE INDEX IF NOT EXISTS knowledge_chunks_model_idx ON knowledge_chunks (embedding_model)`;
 }

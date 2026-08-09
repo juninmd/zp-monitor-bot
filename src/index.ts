@@ -2,7 +2,7 @@ import { timingSafeEqual } from "node:crypto";
 import { Elysia } from "elysia";
 import { config } from "./config";
 import { databaseHealth, initializeDatabase } from "./database";
-import { ingestKnowledgeDirectory } from "./knowledgeStore";
+import { ingestKnowledgeDirectory, knowledgeStats } from "./knowledgeStore";
 import { startLogTail } from "./logTail";
 import { monitorState, startMonitor } from "./monitorState";
 import { handleEvent, sendPeriodicStats } from "./notifier";
@@ -29,7 +29,12 @@ const app = new Elysia()
     const database = await databaseHealth().catch(() => false);
     const ok = ready && database;
     if (!ok) set.status = 503;
-    return { ok, database, knowledgeChunks };
+    return {
+      ok,
+      database,
+      knowledgeIngestedAtBoot: knowledgeChunks,
+      knowledge: database ? await knowledgeStats() : null,
+    };
   })
   .get("/stats", () => getStats())
   .get("/api/state", () => monitorState)
