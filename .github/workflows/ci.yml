@@ -19,5 +19,15 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run lint
       - run: bun run typecheck
+      # src/config.ts valida as env vars obrigatorias no import, entao qualquer
+      # suite que puxe config transitivamente (agentTools, knowledgeTool) morria
+      # com "Missing env var: TELEGRAM_BOT_TOKEN" -> "Cannot access 'config'
+      # before initialization". Localmente passava so porque o Bun carrega o
+      # .env sozinho. Valores fake: nenhum teste faz chamada de rede.
       - run: bun test
+        env:
+          TELEGRAM_BOT_TOKEN: ci-fake-token
+          TELEGRAM_CHAT_ID: "0"
+          LITELLM_API_KEY: ci-fake-key
+          RCON_PASSWORD: ci-fake-rcon
       - run: bun run build
