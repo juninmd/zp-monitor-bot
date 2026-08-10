@@ -5,7 +5,7 @@ import { databaseHealth, initializeDatabase } from "./database";
 import { ingestKnowledgeDirectory, knowledgeStats } from "./knowledgeStore";
 import { startLogTail } from "./logTail";
 import { monitorState, startMonitor } from "./monitorState";
-import { handleEvent, sendPeriodicStats } from "./notifier";
+import { handleEvent, handleMonitorEvents, sendPeriodicStats } from "./notifier";
 import { runRconCommand } from "./rcon";
 import { getStats } from "./state";
 import { sendTelegram } from "./telegram";
@@ -94,6 +94,8 @@ async function bootstrap(): Promise<void> {
   );
   if (config.logTailEnabled) void startLogTail(handleEvent);
   if (config.telegramPollingEnabled) void startTelegramBot();
+  // Transições detectadas pelo polling (mapa trocou, servidor caiu/voltou).
+  setInterval(() => handleMonitorEvents(), 2000);
   setInterval(() => void sendPeriodicStats(), config.statsIntervalMin * 60 * 1000);
 }
 

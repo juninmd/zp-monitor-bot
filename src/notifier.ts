@@ -1,13 +1,16 @@
 import { handlePlayerMessage, sanitizeChatReply } from "./agent/agent";
 import { config } from "./config";
 import type { LogEvent } from "./logParser";
-import { monitorState } from "./monitorState";
+import { renderMapImage } from "./mapImage";
+import { getMetrics, recordHumanChat, recordHumanSeen, recordKill } from "./metrics";
+import { consumeMonitorEvents, monitorState } from "./monitorState";
 import { recordConnect, recordDisconnect } from "./playerStore";
 import { renderRadar } from "./radar";
 import { getPositions, getSnapshot, runRconCommand } from "./rcon";
 import { getStats, playerConnected, playerDisconnected } from "./state";
 import { describeSteamId, formatDuration } from "./steamId";
-import { escapeHtml, sendTelegram, sendTelegramPhoto } from "./telegram";
+import { countryFlag, getSteamProfile } from "./steamProfile";
+import { escapeHtml, sendTelegram, sendTelegramPhoto, sendTelegramPhotoTo } from "./telegram";
 
 const BR_TIME = new Intl.DateTimeFormat("pt-BR", {
   timeZone: "America/Sao_Paulo",
@@ -53,6 +56,19 @@ async function announceJoin(ev: Extract<LogEvent, { type: "connect" }>): Promise
     `🆔 <code>${escapeHtml(steam.raw)}</code> · ${escapeHtml(steam.origin)}`,
     `🌐 IP: <code>${escapeHtml(ev.ip)}</code>`,
   ];
+  // Foto e dados do perfil público da Steam (nome real, país), quando visíveis.
+  const profile = await getSteamProfile(steam.steam64);
+  if (profile) {
+    if (profile.profileName && profile.profileName !== ev.name) {
+      lines.push(`🎭 Conta: ${escapeHtml(profile.profileName)}`);
+    }
+    if (profile.realName) lines.push(`🧑 ${escapeHtml(profile.realName)}`);
+    if (profile.countryCode) {
+      lines.push(
+        `🌍 ${countryFlag(profile.countryCode)} <code>${escapeHtml(profile.countryCode)}</code>`,
+      );
+    }
+  }
   if (steam.profileUrl) lines.push(`🔗 <a href="${steam.profileUrl}">Perfil na Steam</a>`);
   if (!history.firstTime) {
     if (history.lastSeen) lines.push(`🕘 Última vez: ${escapeHtml(agoText(history.lastSeen))}`);
@@ -64,7 +80,12 @@ async function announceJoin(ev: Extract<LogEvent, { type: "connect" }>): Promise
     }
   }
   lines.push(...serverContext());
-  sendTelegram(lines.join("\n"));
+  const text = lines.join("\n");
+  if (profile?.avatar) {
+    await sendTelegramPhotoTo(config.telegramChatId, profile.avatar, text);
+  } else {
+    sendTelegram(text);
+  }
 }
 
 export function handleEvent(ev: LogEvent): void {
@@ -73,7 +94,10 @@ export function handleEvent(ev: LogEvent): void {
       const isNew = playerConnected({ name: ev.name, uid: ev.uid, steamId: ev.steamId, ip: ev.ip });
       // isNew filtra o segundo "connected" que o mesmo steamid emite durante o
       // handshake da Steam - senão todo jogador rende duas notificações.
-      if (isNew && ev.steamId !== "BOT") void announceJoin(ev);
+      if (isNew && ev.steamId !== "BOT") {
+        recordHumanSeen(ev.steamId);
+        void announceJoin(ev);
+      }
       break;
     }
     case "disconnect": {
@@ -94,6 +118,16 @@ export function handleEvent(ev: LogEvent): void {
       relayChat(ev);
       break;
     }
+    case "kill": {
+      recordKill({
+        killerName: ev.killer.name,
+        killerSteamId: ev.killer.steamId,
+        victimName: ev.victim.name,
+        victimSteamId: ev.victim.steamId,
+        weapon: ev.weapon,
+      });
+      break;
+    }
     case "validated":
     case "entered":
       break;
@@ -101,14 +135,14 @@ export function handleEvent(ev: LogEvent): void {
 }
 
 /**
- * Repassa o chat do jogo. O chat de bot só vai junto quando existe pelo menos
- * um humano conectado: aí ele é o outro lado de uma conversa real e sem ele a
- * conversa fica sem sentido no Telegram. Com o servidor só de bot, seria spam.
+ * Repassa o chat do jogo. Falas de bot são descartadas por padrão
+ * (CHAT_RELAY_BOTS=false): elas não são interações de jogadores reais, e com
+ * o servidor só de bot viram spam puro.
  */
 function relayChat(ev: Extract<LogEvent, { type: "say" }>): void {
   const isBot = ev.steamId === "BOT";
-  const humansOnline = getStats().humans;
-  if (isBot && humansOnline === 0) return;
+  if (isBot && !config.chatRelayBots) return;
+  if (!isBot) recordHumanChat();
 
   const scope = ev.teamOnly ? "(time) " : "";
   const who = isBot ? `🤖 ${escapeHtml(ev.name)}` : `<b>${escapeHtml(ev.name)}</b>`;
@@ -138,6 +172,48 @@ async function handleAgentReply(ev: Extract<LogEvent, { type: "say" }>): Promise
   }
 }
 
+let downSince: number | null = null;
+
+/** Consome as transições detectadas pelo polling e avisa no Telegram. */
+export function handleMonitorEvents(): void {
+  for (const event of consumeMonitorEvents()) {
+    if (event.kind === "map_change") {
+      sendTelegram(`🗺️ Mapa trocou: ${escapeHtml(event.message)}`);
+    }
+    if (event.kind === "server_down") {
+      downSince = event.t;
+      sendTelegram(`🔴 Servidor ficou inacessível (A2S sem resposta).`);
+    }
+    if (event.kind === "server_up") {
+      const down =
+        downSince !== null
+          ? ` · ficou ${formatDuration(Math.max(0, Math.round((event.t - downSince) / 1000)))} fora`
+          : "";
+      sendTelegram(`🟢 Servidor voltou ao ar${down}.`);
+      downSince = null;
+    }
+  }
+}
+
+function metricsText(): string[] {
+  const metrics = getMetrics();
+  const lines = [
+    `🏆 Hoje (${metrics.day}): 🔫 ${metrics.kills} kills · 💀 ${metrics.deaths} mortes · 💬 ${metrics.chatLines} msgs`,
+    `👥 Pico: ${metrics.peakHumans} humanos online · distintos hoje: ${metrics.distinctHumans}`,
+  ];
+  if (metrics.topFraggers.length) {
+    lines.push(
+      `🥇 Top fraggers:\n${metrics.topFraggers.map((p) => `• ${escapeHtml(p.name)}: ${p.kills}`).join("\n")}`,
+    );
+  }
+  if (metrics.topWeapons.length) {
+    lines.push(
+      `🔪 Armas: ${escapeHtml(metrics.topWeapons.map(([w, n]) => `${w} ×${n}`).join(" · "))}`,
+    );
+  }
+  return lines;
+}
+
 export async function sendPeriodicStats(): Promise<void> {
   const s = getStats();
   // Bots nunca emitem "connected, address", então nunca chegam no tracker de
@@ -147,6 +223,7 @@ export async function sendPeriodicStats(): Promise<void> {
     [
       `📊 Jogadores reais online: ${s.humans} (bots: ${bots})`,
       `Distintos desde o início do monitor: ${s.distinctPlayersSeen}`,
+      ...metricsText(),
       ...serverContext(),
     ].join("\n"),
   );
@@ -171,11 +248,30 @@ export async function sendPeriodicStats(): Promise<void> {
     console.error("[snapshot] failed", err);
   }
 
+  await sendMapSnapshot();
+}
+
+/**
+ * Print do mapa (TGA do servidor com posições) quando dá; radar gerado quando
+ * o TGA não está acessível; silencioso quando nem jogadores há.
+ */
+export async function sendMapSnapshot(): Promise<void> {
   try {
+    const map = monitorState.info?.map ?? "";
     const players = await getPositions();
-    const png = renderRadar(players);
-    if (png) await sendTelegramPhoto(png, "🗺️ Radar (posição + direção)\n🔴▲ zumbi  🔵● humano");
+    let photo: Buffer | null = null;
+    let fromMap = false;
+    if (map) {
+      photo = await renderMapImage(map, players);
+      fromMap = Boolean(photo);
+    }
+    if (!photo) photo = players.length > 0 ? renderRadar(players) : null;
+    if (!photo) return;
+    const caption = fromMap
+      ? `🗺️ Print do mapa: <b>${escapeHtml(map)}</b>\n🔴▲ zumbi  🔵● humano`
+      : "🗺️ Radar (posição + direção)\n🔴▲ zumbi  🔵● humano";
+    await sendTelegramPhoto(photo, caption);
   } catch (err) {
-    console.error("[radar] failed", err);
+    console.error("[map snapshot] failed", err);
   }
 }

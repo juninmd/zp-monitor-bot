@@ -2,9 +2,12 @@ import { answerZombieQuestion } from "./agent/agent";
 import { config } from "./config";
 import { auditEvent, recentAudit } from "./database";
 import { retrieveKnowledge } from "./knowledgeStore";
+import { renderMapImage } from "./mapImage";
+import { getMetrics } from "./metrics";
 import { monitorState } from "./monitorState";
-import { runRconCommand } from "./rcon";
-import { sendTelegramTo } from "./telegram";
+import { renderRadar } from "./radar";
+import { getPositions, runRconCommand } from "./rcon";
+import { sendTelegramPhotoTo, sendTelegramTo } from "./telegram";
 import { parseTelegramCommand } from "./telegramCommands";
 
 interface TelegramUpdate {
@@ -23,6 +26,9 @@ interface TelegramUpdatesResponse {
 
 const HELP = `Comandos:
 /status — servidor, mapa e jogadores
+/stats — métricas do dia (kills, pico, distintos)
+/radar — posição e direção dos jogadores
+/mapa — print do mapa atual
 /ask <pergunta> — dúvidas sobre Zombie Plague
 /rcon status|stats|users|zp_telemetry_snapshot — console remoto auditado
 /map <nome> — troca de mapa auditada
@@ -41,6 +47,7 @@ function statusText(): string {
     info
       ? `Mapa: ${info.map} | Jogadores reais: ${info.players}/${info.maxplayers} (+${info.bots} bots) | Ping: ${info.ping ?? "—"} ms`
       : null,
+    monitorState.rcon.fps !== null ? `⚡ FPS do servidor: ${monitorState.rcon.fps}` : null,
     telemetry.connected
       ? `Modo: ${telemetry.round?.mode ?? "—"} | 🧟 ${telemetry.zombies} x 🧍 ${telemetry.humans}`
       : "Telemetria ZP indisponível",
@@ -52,17 +59,73 @@ function statusText(): string {
     .join("\n");
 }
 
+function statsText(): string {
+  const metrics = getMetrics();
+  const lines = [
+    `📊 Métricas de hoje (${metrics.day})`,
+    `🔫 Kills: ${metrics.kills} · 💀 Mortes: ${metrics.deaths}`,
+    `👥 Pico de humanos online: ${metrics.peakHumans}`,
+    `🆔 Jogadores distintos hoje: ${metrics.distinctHumans}`,
+    `💬 Mensagens de chat: ${metrics.chatLines}`,
+  ];
+  if (metrics.topFraggers.length) {
+    lines.push(
+      `🥇 Top fraggers:\n${metrics.topFraggers.map((p) => `${p.name}: ${p.kills}`).join("\n")}`,
+    );
+  }
+  if (metrics.topWeapons.length) {
+    lines.push(`🔪 Armas: ${metrics.topWeapons.map(([w, n]) => `${w} ×${n}`).join(" · ")}`);
+  }
+  return lines.join("\n");
+}
+
 export async function handleTelegramText(
   text: string,
   chatId: string,
   actor: string,
-): Promise<string> {
+): Promise<string | null> {
   const parsed = parseTelegramCommand(text);
   if (parsed.kind === "help" || parsed.kind === "unknown") {
     return HELP;
   }
   if (parsed.kind === "status") {
     return statusText();
+  }
+  if (parsed.kind === "stats") {
+    return statsText();
+  }
+  if (parsed.kind === "radar") {
+    try {
+      const players = await getPositions();
+      const png = players.length > 0 ? renderRadar(players) : null;
+      if (png) {
+        await sendTelegramPhotoTo(
+          chatId,
+          png,
+          "🗺️ Radar (posição + direção)\n🔴▲ zumbi  🔵● humano",
+        );
+        return null;
+      }
+      return "Sem jogadores para desenhar o radar.";
+    } catch (error) {
+      return `❌ Radar indisponível: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+  if (parsed.kind === "map") {
+    try {
+      const map = monitorState.info?.map ?? "";
+      const players = await getPositions();
+      const png = map ? await renderMapImage(map, players) : null;
+      if (png) {
+        await sendTelegramPhotoTo(chatId, png, `🗺️ Print do mapa: ${map}\n🔴▲ zumbi  🔵● humano`);
+        return null;
+      }
+      return map
+        ? "Print do mapa indisponível (TGA não acessível via kubectl)."
+        : "Mapa desconhecido.";
+    } catch (error) {
+      return `❌ Print indisponível: ${error instanceof Error ? error.message : String(error)}`;
+    }
   }
   if (parsed.kind === "audit") {
     const rows = await recentAudit();
@@ -159,7 +222,8 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
     });
     return;
   }
-  await sendTelegramTo(chatId, await handleTelegramText(message.text, chatId, actor));
+  const reply = await handleTelegramText(message.text, chatId, actor);
+  if (reply) await sendTelegramTo(chatId, reply);
 }
 
 export async function startTelegramBot(): Promise<void> {

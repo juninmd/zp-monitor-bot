@@ -1,4 +1,5 @@
 import { GameDig, type QueryResult } from "gamedig";
+import { samplePeakHumans } from "./metrics";
 import type { Snapshot } from "./rcon";
 import { parseStatus, type StatusClient, splitByStatus } from "./statusParser";
 
@@ -108,6 +109,35 @@ function pushHistory(cap: number): void {
   history.ping = history.ping.slice(-cap);
 }
 
+export interface MonitorEvent {
+  kind: "map_change" | "server_down" | "server_up";
+  message: string;
+  t: number;
+}
+
+export const monitorEvents: MonitorEvent[] = [];
+const MONITOR_EVENTS_CAP = 50;
+
+let lastOnline: boolean | null = null;
+let lastMap = "";
+
+/**
+ * Eventos de transição detectados pelo polling (mapa trocou, servidor caiu/
+ * voltou). O consumidor esvazia a fila; quem quiser latência, consome a cada
+ * tick. Só transições emitem evento, então não há spam de repetição.
+ */
+export function consumeMonitorEvents(): MonitorEvent[] {
+  const events = monitorEvents.splice(0, monitorEvents.length);
+  return events;
+}
+
+function pushMonitorEvent(event: MonitorEvent): void {
+  monitorEvents.push(event);
+  if (monitorEvents.length > MONITOR_EVENTS_CAP) {
+    monitorEvents.splice(0, monitorEvents.length - MONITOR_EVENTS_CAP);
+  }
+}
+
 let lastStatus: { clients: StatusClient[]; at: number } | null = null;
 
 function toMonitorPlayer(player: QueryResult["players"][number]): MonitorPlayer {
@@ -166,9 +196,30 @@ async function pollA2s(options: MonitorOptions, broadcast: () => void): Promise<
     const resolved = resolvePlayers(result);
     monitorState.players = resolved.players;
     monitorState.playersSource = resolved.source;
+    samplePeakHumans(resolved.players.length);
+    if (lastOnline === false) {
+      pushMonitorEvent({
+        kind: "server_up",
+        message: `Servidor voltou: ${result.name}`,
+        t: Date.now(),
+      });
+    }
+    if (lastMap && lastMap !== result.map) {
+      pushMonitorEvent({
+        kind: "map_change",
+        message: `${lastMap} → ${result.map}`,
+        t: Date.now(),
+      });
+    }
+    lastOnline = true;
+    lastMap = result.map;
   } catch (error) {
     monitorState.connection.online = false;
     monitorState.connection.lastError = errorMessage(error);
+    if (lastOnline !== false) {
+      pushMonitorEvent({ kind: "server_down", message: errorMessage(error), t: Date.now() });
+    }
+    lastOnline = false;
   } finally {
     monitorState.connection.lastUpdate = Date.now();
     pushHistory(options.historyLength);

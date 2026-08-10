@@ -20,6 +20,11 @@ export const config = {
   container: process.env.K8S_CONTAINER ?? "cs16-server",
   logTailEnabled: (process.env.LOG_TAIL_ENABLED ?? "true") !== "false",
   telegramPollingEnabled: (process.env.TELEGRAM_POLLING_ENABLED ?? "true") !== "false",
+  // Foto de perfil Steam: usa a API oficial quando a chave existe, senão lê o
+  // perfil público XML. O chat de bot no Telegram é indesejado por padrão;
+  // CHAT_RELAY_BOTS=true religa o repasse de falas de bots.
+  steamApiKey: process.env.STEAM_API_KEY ?? "",
+  chatRelayBots: (process.env.CHAT_RELAY_BOTS ?? "false") === "true",
   statsIntervalMin: positiveNumber("STATS_INTERVAL_MIN", "30"),
   port: positiveNumber("PORT", "8091"),
   serverHost: process.env.SERVER_HOST ?? "cs16-server-udp.server-do-junin.svc.cluster.local",

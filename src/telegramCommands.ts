@@ -2,6 +2,9 @@ export type TelegramCommand =
   | { kind: "rcon"; command: string }
   | { kind: "ask"; question: string }
   | { kind: "status" }
+  | { kind: "stats" }
+  | { kind: "radar" }
+  | { kind: "map" }
   | { kind: "audit" }
   | { kind: "help" }
   | { kind: "unknown" };
@@ -12,6 +15,12 @@ export function parseTelegramCommand(text: string): TelegramCommand {
 
   if (normalized === "/start" || normalized === "/help") return { kind: "help" };
   if (normalized === "/status" || normalized === "/players") return { kind: "status" };
+  if (normalized === "/stats" || normalized === "/metrics") return { kind: "stats" };
+  if (normalized === "/radar") return { kind: "radar" };
+  // /map já é troca de mapa auditada; /mapa (ou /print) é o print do mapa.
+  if (normalized === "/mapa" || normalized === "/print" || normalized === "/screenshot") {
+    return { kind: "map" };
+  }
   if (normalized === "/audit") return { kind: "audit" };
 
   const rcon = input.match(/^\/rcon\s+(status|stats|users|zp_telemetry_snapshot)$/i);

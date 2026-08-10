@@ -29,4 +29,14 @@ describe("parseTelegramCommand", () => {
     });
     expect(parseTelegramCommand("/audit")).toEqual({ kind: "audit" });
   });
+
+  test("maps new snapshot and stats commands", () => {
+    expect(parseTelegramCommand("/radar")).toEqual({ kind: "radar" });
+    expect(parseTelegramCommand("/mapa")).toEqual({ kind: "map" });
+    expect(parseTelegramCommand("/print")).toEqual({ kind: "map" });
+    expect(parseTelegramCommand("/stats")).toEqual({ kind: "stats" });
+    expect(parseTelegramCommand("/metrics")).toEqual({ kind: "stats" });
+    // /map continua sendo troca de mapa auditada, não print.
+    expect(parseTelegramCommand("/map")).toEqual({ kind: "unknown" });
+  });
 });

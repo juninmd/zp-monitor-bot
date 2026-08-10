@@ -15,12 +15,19 @@ Google ADK via LiteLLM, RAG com pgvector e integração Telegram com auditoria.
   Cada gravação gera auditoria e só retorna sucesso depois do embed e upsert no
   pgvector.
 - Segredos ficam em `.env` local ou Kubernetes Secret; nunca na imagem/Git.
+- O print do mapa lê `maps/<mapa>.tga` do pod do servidor via `kubectl exec`;
+  sem kubectl no pod o recurso degrada para o radar gerado localmente.
 
 ## Telegram
 
 - Em produção, o `megabrain` é o único consumidor de `getUpdates` e encaminha
   os comandos namespaced ao endpoint interno autenticado deste serviço.
 - `/status` ou `/players`: mapa, jogadores e telemetria.
+- `/stats` ou `/metrics`: métricas do dia (kills, mortes, pico de humanos,
+  distintos, top fraggers e armas).
+- `/radar`: posição e direção dos jogadores.
+- `/mapa` ou `/print`: print do mapa atual (TGA do servidor com posições
+  sobrepostas quando a calibração do overview existe; degrada para o radar).
 - `/ask <pergunta>` ou texto livre: resposta ADK com contexto recuperado do
   pgvector.
 - `/ask registre na memória que <fato>`: grava o fato via tool e o deixa
@@ -30,6 +37,17 @@ Google ADK via LiteLLM, RAG com pgvector e integração Telegram com auditoria.
 - `/audit`: últimas ações.
 - No bot compartilhado, use `/zp`, `/zpstatus`, `/zprcon`, `/zpmap` e
   `/zpaudit`.
+
+## Notificações
+
+- Entrada de jogador real com foto do perfil Steam (via `STEAM_API_KEY`, ou o
+  perfil XML público quando a chave não existe), nome real, país e histórico.
+- Chat do jogo só de jogadores reais por padrão (`CHAT_RELAY_BOTS=false`
+  descarta falas de bots).
+- Kills/mortes alimentam métricas diárias; morte e pico de humanos são
+  amostrados pelo polling.
+- Mapa trocado e servidor que cai/volta são anunciados na hora.
+- O resumo periódico inclui métricas, último round e o print do mapa.
 
 ## Desenvolvimento
 

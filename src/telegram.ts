@@ -1,15 +1,23 @@
 import { config } from "./config";
 
 const MIN_INTERVAL_MS = 1200;
-interface QueueItem {
+interface TextItem {
   chatId: string;
   text: string;
   html: boolean;
   resolve: () => void;
 }
+interface PhotoItem {
+  chatId: string;
+  photo: Buffer;
+  caption?: string;
+  resolve: () => void;
+}
 
-const queue: QueueItem[] = [];
+const queue: TextItem[] = [];
+const photoQueue: PhotoItem[] = [];
 let draining = false;
+let drainingPhotos = false;
 
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -46,6 +54,36 @@ async function drain(): Promise<void> {
   draining = false;
 }
 
+async function drainPhotos(): Promise<void> {
+  if (drainingPhotos) return;
+  drainingPhotos = true;
+  while (photoQueue.length > 0) {
+    const item = photoQueue.shift();
+    if (!item) break;
+    const form = new FormData();
+    form.append("chat_id", item.chatId);
+    if (item.caption) {
+      form.append("caption", item.caption);
+      form.append("parse_mode", "HTML");
+    }
+    form.append("photo", new Blob([item.photo], { type: "image/png" }), "snapshot.png");
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendPhoto`, {
+        method: "POST",
+        body: form,
+      });
+      if (!res.ok) {
+        console.error("[telegram] sendPhoto failed", res.status, await res.text());
+      }
+    } catch (err) {
+      console.error("[telegram] sendPhoto error", err);
+    }
+    item.resolve();
+    await new Promise((r) => setTimeout(r, MIN_INTERVAL_MS));
+  }
+  drainingPhotos = false;
+}
+
 export function sendTelegram(text: string): void {
   void sendTelegramTo(config.telegramChatId, text, true);
 }
@@ -57,23 +95,20 @@ export function sendTelegramTo(chatId: string, text: string, html = false): Prom
   });
 }
 
-export async function sendTelegramPhoto(photo: Buffer, caption?: string): Promise<void> {
-  const form = new FormData();
-  form.append("chat_id", config.telegramChatId);
-  if (caption) form.append("caption", caption);
-  form.append("photo", new Blob([photo], { type: "image/png" }), "radar.png");
+/** Envia foto para o chat padrão; a fila respeita o rate limit do Bot API. */
+export function sendTelegramPhoto(photo: Buffer, caption?: string): Promise<void> {
+  return sendTelegramPhotoTo(config.telegramChatId, photo, caption);
+}
 
-  try {
-    const res = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendPhoto`, {
-      method: "POST",
-      body: form,
-    });
-    if (!res.ok) {
-      console.error("[telegram] sendPhoto failed", res.status, await res.text());
-    }
-  } catch (err) {
-    console.error("[telegram] sendPhoto error", err);
-  }
+export function sendTelegramPhotoTo(
+  chatId: string,
+  photo: Buffer,
+  caption?: string,
+): Promise<void> {
+  return new Promise((resolve) => {
+    photoQueue.push({ chatId, photo, caption, resolve });
+    void drainPhotos();
+  });
 }
 
 export { escapeHtml };
