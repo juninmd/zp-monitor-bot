@@ -14,6 +14,26 @@ import type { RadarPlayer } from "./rcon";
 const ZOMBIE_COLOR = "#e74c3c";
 const HUMAN_COLOR = "#3498db";
 
+/**
+ * O overview usa verde puro como cor-chave de transparência: o engine não
+ * desenha esses pixels, mas um PNG cru mostra a placa verde inteira. Troca
+ * pelo fundo escuro do HUD para o print sair como o jogador vê.
+ */
+const BACKDROP: [number, number, number] = [22, 26, 30];
+
+function maskChromaKey(rgba: Uint8ClampedArray): void {
+  for (let i = 0; i < rgba.length; i += 4) {
+    const r = rgba[i] ?? 0;
+    const g = rgba[i + 1] ?? 0;
+    const b = rgba[i + 2] ?? 0;
+    if (r < 60 && g > 180 && b < 60) {
+      rgba[i] = BACKDROP[0];
+      rgba[i + 1] = BACKDROP[1];
+      rgba[i + 2] = BACKDROP[2];
+    }
+  }
+}
+
 const withPrefixes = (path: string): string[] => [`cstrike/${path}`, path, `valve/${path}`];
 
 const txtCandidates = (map: string): string[] => [
@@ -130,6 +150,7 @@ export async function renderMapImage(map: string, players: RadarPlayer[]): Promi
   const ctx = canvas.getContext("2d");
   const base = ctx.createImageData(image.width, image.height);
   base.data.set(image.rgba);
+  maskChromaKey(base.data);
   ctx.putImageData(base, 0, 0);
 
   if (players.length > 0) {
