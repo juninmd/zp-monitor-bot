@@ -25,9 +25,10 @@ export interface DailyTotals {
   kills: number;
   deaths: number;
   peakHumans: number;
-  distinctHumans: number;
-  topFraggers: Array<{ steamId: string; name: string; kills: number; deaths: number }>;
-  topWeapons: Array<[string, number]>;
+  /** SteamIDs distintos do dia, para semear o Set em memória sem divergir. */
+  distinctHumans: string[];
+  fraggers: Array<{ steamId: string; name: string; kills: number; deaths: number }>;
+  weapons: Array<[string, number]>;
 }
 
 export async function initializeMetricsTables(): Promise<void> {

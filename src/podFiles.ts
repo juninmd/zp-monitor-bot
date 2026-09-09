@@ -8,6 +8,7 @@ import { config } from "./config";
 import { selectLogPod } from "./logTail";
 
 interface KubectlProc {
+  stderr: ReadableStream<Uint8Array>;
   stdout: ReadableStream<Uint8Array>;
   exited: Promise<number>;
   kill: () => void;
@@ -20,7 +21,7 @@ export function kubectlCapture(args: string[], timeoutMs = 6000): Promise<Buffer
     try {
       proc = Bun.spawn(["kubectl", ...args], {
         stdout: "pipe",
-        stderr: "ignore",
+        stderr: "pipe",
       }) as unknown as KubectlProc;
     } catch (error) {
       reject(error instanceof Error ? error : new Error(String(error)));
@@ -31,18 +32,41 @@ export function kubectlCapture(args: string[], timeoutMs = 6000): Promise<Buffer
       proc.kill();
       reject(new Error("kubectl timeout"));
     }, timeoutMs);
+    const errChunks: Uint8Array[] = [];
     (async () => {
+      // Drena stderr junto: sem ele um container errado, um RBAC negado em
+      // pods/exec e "mapa sem overview" chegavam aqui exatamente iguais.
+      const drainErr = (async () => {
+        for await (const chunk of proc.stderr) errChunks.push(chunk);
+      })();
       for await (const chunk of proc.stdout) chunks.push(chunk);
       const code = await proc.exited;
+      await drainErr;
       clearTimeout(timer);
       if (code === 0) resolve(Buffer.concat(chunks));
-      else reject(new Error(`kubectl exit ${code}`));
+      else {
+        const detail = Buffer.concat(errChunks).toString("utf8").trim().split("\n")[0] ?? "";
+        reject(new Error(`kubectl exit ${code}${detail ? `: ${detail.slice(0, 200)}` : ""}`));
+      }
     })().catch((error) => {
       clearTimeout(timer);
       proc.kill();
       reject(error);
     });
   });
+}
+
+/**
+ * Falha de leitura no pod é recorrente por natureza (roda a cada print), então
+ * o aviso é deduplicado: sem isso o log vira flood, com "ignore" o operador
+ * não distingue container errado de mapa sem overview.
+ */
+const warned = new Set<string>();
+function warnOnce(message: string): void {
+  if (warned.has(message)) return;
+  if (warned.size > 20) warned.clear();
+  warned.add(message);
+  console.warn(`[podFiles] ${message}`);
 }
 
 const POD_TTL_MS = 60_000;
@@ -69,9 +93,11 @@ async function selectPod(): Promise<string | null> {
       }>;
     };
     const pod = selectLogPod(pods.items) ?? null;
+    if (!pod) warnOnce("sem pod Running para o seletor configurado");
     podCache = { at: Date.now(), pod };
     return pod;
-  } catch {
+  } catch (error) {
+    warnOnce(`get pods falhou: ${error instanceof Error ? error.message : String(error)}`);
     return null;
   }
 }
@@ -114,7 +140,8 @@ export async function fetchPodFiles(groups: string[][]): Promise<Array<Buffer | 
       script,
     ]);
     return splitMarkedOutput(out.toString("utf8"), groups.length);
-  } catch {
+  } catch (error) {
+    warnOnce(`exec falhou: ${error instanceof Error ? error.message : String(error)}`);
     // Pod pode ter sido reciclado entre o get e o exec: força novo lookup.
     podCache = { at: 0, pod: null };
     return empty;

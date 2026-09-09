@@ -34,12 +34,16 @@ interface MapAssets {
   image: DecodedImage | null;
 }
 
-// Overview e bitmap não mudam enquanto o mapa é o mesmo: um miss por mapa.
-const assetCache = new Map<string, MapAssets>();
+/**
+ * Overview e bitmap não mudam enquanto o mapa é o mesmo, mas cada entrada
+ * segura o RGBA decodificado inteiro (4 MB num overview 1024²). Guardar a
+ * rotação toda vazaria centenas de MB, então só o mapa atual fica em cache:
+ * o custo de um miss é um kubectl exec.
+ */
+let cachedMap: { map: string; assets: MapAssets } | null = null;
 
 async function loadAssets(map: string): Promise<MapAssets> {
-  const cached = assetCache.get(map);
-  if (cached) return cached;
+  if (cachedMap?.map === map) return cachedMap.assets;
 
   const [txtRaw, imageRaw] = await fetchPodFiles([txtCandidates(map), imageCandidates(map, null)]);
   const overview = txtRaw ? parseOverview(txtRaw.toString("utf8")) : null;
@@ -51,15 +55,20 @@ async function loadAssets(map: string): Promise<MapAssets> {
     const [fallback] = await fetchPodFiles([withPrefixes(declared)]);
     image = fallback ? decodeImage(fallback) : null;
   }
+  if (image && !overview) {
+    console.warn(
+      `[mapImage] ${map}: bitmap encontrado mas sem calibração utilizável; caindo para o radar`,
+    );
+  }
 
   const assets: MapAssets = { overview, image };
   // Só memoriza sucesso: um pod fora do ar não deve congelar "sem mapa".
-  if (image) assetCache.set(map, assets);
+  if (image) cachedMap = { map, assets };
   return assets;
 }
 
 export function clearMapAssetCache(): void {
-  assetCache.clear();
+  cachedMap = null;
 }
 
 function drawPlayer(ctx: SKRSContext2D, px: number, py: number, p: RadarPlayer, r: number): void {
@@ -107,13 +116,15 @@ function drawScoreboard(ctx: SKRSContext2D, width: number, players: RadarPlayer[
 }
 
 /**
- * Print do mapa com posições sobrepostas quando a calibração existe; só a
- * imagem do mapa quando não; null quando nem o bitmap está disponível.
+ * Print do mapa com as posições sobrepostas. Devolve null quando o bitmap ou
+ * a calibração faltam: sem calibração não dá para posicionar ninguém, e
+ * mandar a imagem crua com a legenda "🔴▲ zumbi 🔵● humano" seria mentira -
+ * o caller cai no radar, que ao menos mostra as posições de verdade.
  */
 export async function renderMapImage(map: string, players: RadarPlayer[]): Promise<Buffer | null> {
   if (!map) return null;
   const { overview, image } = await loadAssets(map);
-  if (!image) return null;
+  if (!image || !overview) return null;
 
   const canvas = createCanvas(image.width, image.height);
   const ctx = canvas.getContext("2d");
@@ -121,7 +132,7 @@ export async function renderMapImage(map: string, players: RadarPlayer[]): Promi
   base.data.set(image.rgba);
   ctx.putImageData(base, 0, 0);
 
-  if (overview && players.length > 0) {
+  if (players.length > 0) {
     const r = Math.max(5, Math.round(Math.min(image.width, image.height) / 90));
     for (const p of players) {
       const at = projectToPixels(overview, p.x, p.y, image.width, image.height);

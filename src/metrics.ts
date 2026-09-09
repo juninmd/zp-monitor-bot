@@ -30,8 +30,6 @@ interface DayMetrics {
   weapons: Map<string, number>;
   peakHumans: number;
   distinctHumans: Set<string>;
-  /** Distintos do dia lidos do banco no boot, antes deste processo existir. */
-  hydratedDistinct: number;
 }
 
 function dayKey(): string {
@@ -47,7 +45,6 @@ let current: DayMetrics = {
   weapons: new Map(),
   peakHumans: 0,
   distinctHumans: new Set(),
-  hydratedDistinct: 0,
 };
 
 function ensureDay(): void {
@@ -62,7 +59,6 @@ function ensureDay(): void {
       weapons: new Map(),
       peakHumans: 0,
       distinctHumans: new Set(),
-      hydratedDistinct: 0,
     };
   }
 }
@@ -140,16 +136,20 @@ export async function hydrateMetrics(): Promise<void> {
   current.kills = totals.kills;
   current.deaths = totals.deaths;
   current.peakHumans = Math.max(current.peakHumans, totals.peakHumans);
-  current.hydratedDistinct = totals.distinctHumans;
+  // Semeia o Set com os steamids do dia em vez de guardar só a contagem: com a
+  // contagem, quem entrasse depois do boot não somava até o Set vivo passar o
+  // valor hidratado.
+  for (const steamId of totals.distinctHumans) current.distinctHumans.add(steamId);
   // Mesma chave do agregado vivo: kills posteriores somam no jogador certo em
-  // vez de abrirem uma segunda linha no top fragger.
+  // vez de abrirem uma segunda linha no top fragger. Sem LIMIT na consulta: o
+  // 6º colocado de hoje reiniciaria do zero e nunca mais apareceria no board.
   current.players = new Map(
-    totals.topFraggers.map(
+    totals.fraggers.map(
       (p) =>
         [humanKey(p.name, p.steamId), { name: p.name, kills: p.kills, deaths: p.deaths }] as const,
     ),
   );
-  current.weapons = new Map(totals.topWeapons);
+  current.weapons = new Map(totals.weapons);
 }
 
 export function getMetrics() {
@@ -165,7 +165,7 @@ export function getMetrics() {
     deaths: current.deaths,
     chatLines: current.chatLines,
     peakHumans: current.peakHumans,
-    distinctHumans: Math.max(current.distinctHumans.size, current.hydratedDistinct),
+    distinctHumans: current.distinctHumans.size,
     topFraggers,
     topWeapons,
   };

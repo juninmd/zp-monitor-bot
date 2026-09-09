@@ -35,13 +35,17 @@ let fetched: string[][][] = [];
 // testes de podFiles passam a exercitar o dublê em vez do módulo.
 const realPodFiles = await import("../src/podFiles");
 
+/** Quando false, o pod tem o bitmap mas nenhum overviews/<mapa>.txt. */
+let overviewAvailable = true;
+
 mock.module("../src/podFiles", () => ({
   ...realPodFiles,
   fetchPodFiles: async (groups: string[][]) => {
     fetched.push(groups);
-    return groups.map((paths) =>
-      paths.some((p) => p.endsWith(".txt")) ? Buffer.from(OVERVIEW_TXT, "utf8") : buildBmp(128, 96),
-    );
+    return groups.map((paths) => {
+      if (!paths.some((p) => p.endsWith(".txt"))) return buildBmp(128, 96);
+      return overviewAvailable ? Buffer.from(OVERVIEW_TXT, "utf8") : null;
+    });
   },
 }));
 
@@ -75,5 +79,29 @@ describe("renderMapImage", () => {
     fetched = [];
     expect(await renderMapImage("", [])).toBeNull();
     expect(fetched).toHaveLength(0);
+  });
+
+  test("bitmap sem calibração devolve null em vez de imagem crua", async () => {
+    // Sem overview não dá para posicionar ninguém: mandar a imagem com a
+    // legenda "🔴▲ zumbi 🔵● humano" seria mentira. O caller cai no radar.
+    clearMapAssetCache();
+    overviewAvailable = false;
+    try {
+      expect(
+        await renderMapImage("zm_sem_overview", [{ team: "z", x: 0, y: 0, angle: 0 }]),
+      ).toBeNull();
+    } finally {
+      overviewAvailable = true;
+    }
+  });
+
+  test("trocar de mapa não acumula o RGBA do anterior em cache", async () => {
+    clearMapAssetCache();
+    fetched = [];
+    await renderMapImage("zm_a", []);
+    await renderMapImage("zm_b", []);
+    await renderMapImage("zm_a", []);
+    // Só o mapa atual fica em cache: voltar para zm_a lê o pod de novo.
+    expect(fetched).toHaveLength(3);
   });
 });

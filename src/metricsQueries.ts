@@ -62,7 +62,6 @@ export async function loadDailyTotals(): Promise<DailyTotals | null> {
         ) AS rows
        GROUP BY steam_id
        ORDER BY sum(kills) DESC
-       LIMIT 5
     `;
     const weapons = await database<Array<{ weapon: string; total: number | string }>>`
       SELECT weapon, count(*)::int AS total
@@ -72,22 +71,21 @@ export async function loadDailyTotals(): Promise<DailyTotals | null> {
          AND weapon <> ''
        GROUP BY weapon
        ORDER BY count(*) DESC
-       LIMIT 3
     `;
     const [peak] = await database<Array<{ peak: number | string | null }>>`
       SELECT max(humans) AS peak FROM presence_samples
        WHERE created_at >= ${dayStart}
     `;
-    const [distinct] = await database<Array<{ total: number | string | null }>>`
-      SELECT count(DISTINCT steam_id) AS total FROM player_sessions
+    const distinct = await database<Array<{ steam_id: string }>>`
+      SELECT DISTINCT steam_id FROM player_sessions
        WHERE connected_at >= ${dayStart}
     `;
     return {
       kills: int(totals?.kills),
       deaths: int(totals?.deaths),
       peakHumans: int(peak?.peak),
-      distinctHumans: int(distinct?.total),
-      topFraggers: fraggers
+      distinctHumans: distinct.map((row) => row.steam_id),
+      fraggers: fraggers
         .filter((f) => int(f.kills) > 0)
         .map((f) => ({
           steamId: f.steam_id,
@@ -95,7 +93,7 @@ export async function loadDailyTotals(): Promise<DailyTotals | null> {
           kills: int(f.kills),
           deaths: int(f.deaths),
         })),
-      topWeapons: weapons.map((w) => [w.weapon, int(w.total)] as [string, number]),
+      weapons: weapons.map((w) => [w.weapon, int(w.total)] as [string, number]),
     };
   } catch (error) {
     console.error("[metricsQueries] loadDailyTotals falhou", error);

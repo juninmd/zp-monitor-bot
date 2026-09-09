@@ -47,6 +47,32 @@ export function serverContext(): string[] {
   return lines;
 }
 
+/**
+ * sendPhoto rejeita legenda acima de 1024 caracteres com HTTP 400, e a fila só
+ * loga o erro - a notificação sumiria inteira justamente nos casos mais ricos
+ * (histórico longo, muitos nicks antigos, servidor cheio). Acima do limite a
+ * foto vai com uma linha e o corpo vai como mensagem separada.
+ */
+const CAPTION_LIMIT = 1024;
+
+async function sendWithAvatar(
+  avatar: Buffer | null,
+  headline: string,
+  body: string[],
+): Promise<void> {
+  const full = [headline, ...body].join("\n");
+  if (!avatar) {
+    sendTelegram(full);
+    return;
+  }
+  if (full.length <= CAPTION_LIMIT) {
+    await sendTelegramPhotoTo(config.telegramChatId, avatar, full);
+    return;
+  }
+  await sendTelegramPhotoTo(config.telegramChatId, avatar, headline);
+  sendTelegram(body.join("\n"));
+}
+
 const DAY_MS = 24 * 60 * 60 * 1000;
 
 /** Idade da conta Steam: o sinal mais barato de smurf/conta descartável. */
@@ -71,7 +97,6 @@ export async function announceJoin(ev: Extract<LogEvent, { type: "connect" }>): 
     : `🟢 <b>${escapeHtml(ev.name)}</b> entrou — ${history.visits + 1}ª visita`;
 
   const lines = [
-    header,
     `🆔 <code>${escapeHtml(steam.raw)}</code> · ${escapeHtml(steam.origin)}`,
     `🌐 IP: <code>${escapeHtml(ev.ip)}</code>`,
   ];
@@ -107,13 +132,7 @@ export async function announceJoin(ev: Extract<LogEvent, { type: "connect" }>): 
     }
   }
   lines.push(...serverContext());
-
-  const text = lines.join("\n");
-  if (profile?.avatar) {
-    await sendTelegramPhotoTo(config.telegramChatId, profile.avatar, text);
-  } else {
-    sendTelegram(text);
-  }
+  await sendWithAvatar(profile?.avatar ?? null, header, lines);
 }
 
 /** Saída com a mesma foto e o mesmo contexto de servidor da entrada. */
@@ -125,20 +144,12 @@ export async function announceLeave(ev: {
   seconds: number | null;
 }): Promise<void> {
   const steam = describeSteamId(ev.steamId);
-  const lines = [
-    `🔴 <b>${escapeHtml(ev.name)}</b> saiu${ev.reason ? ` (${escapeHtml(ev.reason)})` : ""}`,
-    `🆔 <code>${escapeHtml(ev.steamId)}</code>`,
-  ];
+  const header = `🔴 <b>${escapeHtml(ev.name)}</b> saiu${ev.reason ? ` (${escapeHtml(ev.reason)})` : ""}`;
+  const lines = [`🆔 <code>${escapeHtml(ev.steamId)}</code>`];
   if (ev.team) lines.push(`🎽 Time: ${escapeHtml(ev.team)}`);
   if (ev.seconds !== null) lines.push(`⏱️ Ficou: ${formatDuration(ev.seconds)}`);
   lines.push(...serverContext());
-
-  const text = lines.join("\n");
   // Perfil já está em cache da entrada: não custa uma chamada nova.
   const profile = await getSteamProfile(steam.steam64);
-  if (profile?.avatar) {
-    await sendTelegramPhotoTo(config.telegramChatId, profile.avatar, text);
-  } else {
-    sendTelegram(text);
-  }
+  await sendWithAvatar(profile?.avatar ?? null, header, lines);
 }
