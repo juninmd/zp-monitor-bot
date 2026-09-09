@@ -5,6 +5,7 @@ import { retrieveKnowledge } from "./knowledgeStore";
 import { renderMapImage } from "./mapImage";
 import { getMetrics } from "./metrics";
 import { monitorState } from "./monitorState";
+import { historyText } from "./notifier";
 import { renderRadar } from "./radar";
 import { getPositions, runRconCommand } from "./rcon";
 import { sendTelegramPhotoTo, sendTelegramTo } from "./telegram";
@@ -27,6 +28,7 @@ interface TelegramUpdatesResponse {
 const HELP = `Comandos:
 /status — servidor, mapa e jogadores
 /stats — métricas do dia (kills, pico, distintos)
+/ranking — ranking de 7 dias e recorde de pico
 /radar — posição e direção dos jogadores
 /mapa — print do mapa atual
 /ask <pergunta> — dúvidas sobre Zombie Plague
@@ -94,6 +96,10 @@ export async function handleTelegramText(
   if (parsed.kind === "stats") {
     return statsText();
   }
+  if (parsed.kind === "ranking") {
+    const lines = await historyText();
+    return lines.length ? lines.join("\n") : "Sem histórico suficiente ainda.";
+  }
   if (parsed.kind === "radar") {
     try {
       const players = await getPositions();
@@ -121,7 +127,7 @@ export async function handleTelegramText(
         return null;
       }
       return map
-        ? "Print do mapa indisponível (TGA não acessível via kubectl)."
+        ? "Print do mapa indisponível (overview não acessível via kubectl)."
         : "Mapa desconhecido.";
     } catch (error) {
       return `❌ Print indisponível: ${error instanceof Error ? error.message : String(error)}`;

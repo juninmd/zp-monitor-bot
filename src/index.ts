@@ -4,6 +4,8 @@ import { config } from "./config";
 import { databaseHealth, initializeDatabase } from "./database";
 import { ingestKnowledgeDirectory, knowledgeStats } from "./knowledgeStore";
 import { startLogTail } from "./logTail";
+import { hydrateMetrics } from "./metrics";
+import { flushKills, initializeMetricsTables } from "./metricsStore";
 import { monitorState, startMonitor } from "./monitorState";
 import { handleEvent, handleMonitorEvents, sendPeriodicStats } from "./notifier";
 import { runRconCommand } from "./rcon";
@@ -74,6 +76,10 @@ function broadcastState(): void {
 
 async function bootstrap(): Promise<void> {
   await initializeDatabase();
+  await initializeMetricsTables();
+  // Reidrata o dia antes de anunciar boot: um restart no meio da noite não
+  // pode reportar "0 kills hoje" com o servidor cheio.
+  await hydrateMetrics();
   knowledgeChunks = await ingestKnowledgeDirectory();
   ready = true;
   console.log(
@@ -97,6 +103,13 @@ async function bootstrap(): Promise<void> {
   // Transições detectadas pelo polling (mapa trocou, servidor caiu/voltou).
   setInterval(() => handleMonitorEvents(), 2000);
   setInterval(() => void sendPeriodicStats(), config.statsIntervalMin * 60 * 1000);
+}
+
+// Kills ficam até 10s em buffer: descarrega antes do pod morrer.
+for (const signal of ["SIGTERM", "SIGINT"] as const) {
+  process.on(signal, () => {
+    void flushKills().finally(() => process.exit(0));
+  });
 }
 
 bootstrap().catch((error) => {

@@ -1,7 +1,12 @@
 /**
- * Métricas do dia (fuso America/Sao_Paulo), em memória. Zeram à meia-noite BR.
+ * Métricas do dia (fuso America/Sao_Paulo). O agregado vive em memória para o
+ * caminho quente do parser de log, mas é espelhado em `kill_events` e
+ * reidratado no boot: restart do pod não zera mais o dia.
  * Só contam jogadores reais: kills/chat envolvendo bots são ignorados.
  */
+
+import { loadDailyTotals } from "./metricsQueries";
+import { enqueueKill, samplePresence } from "./metricsStore";
 
 const BR_DAY = new Intl.DateTimeFormat("en-CA", {
   timeZone: "America/Sao_Paulo",
@@ -25,6 +30,8 @@ interface DayMetrics {
   weapons: Map<string, number>;
   peakHumans: number;
   distinctHumans: Set<string>;
+  /** Distintos do dia lidos do banco no boot, antes deste processo existir. */
+  hydratedDistinct: number;
 }
 
 function dayKey(): string {
@@ -40,6 +47,7 @@ let current: DayMetrics = {
   weapons: new Map(),
   peakHumans: 0,
   distinctHumans: new Set(),
+  hydratedDistinct: 0,
 };
 
 function ensureDay(): void {
@@ -54,6 +62,7 @@ function ensureDay(): void {
       weapons: new Map(),
       peakHumans: 0,
       distinctHumans: new Set(),
+      hydratedDistinct: 0,
     };
   }
 }
@@ -71,6 +80,9 @@ export function recordKill(k: {
   ensureDay();
   const killerBot = k.killerSteamId === "BOT";
   const victimBot = k.victimSteamId === "BOT";
+  // Persiste toda kill que envolva humano; o filtro bot-x-bot fica no SQL,
+  // para as agregações usarem exatamente as mesmas regras daqui.
+  if (!killerBot || !victimBot) enqueueKill(k);
   // Só kills entre humanos reais contam para o placar - matar bot inflaria
   // o top fragger com farm de bot.
   if (!killerBot && !victimBot) {
@@ -111,9 +123,33 @@ export function recordHumanSeen(steamId: string): void {
   if (steamId !== "BOT") current.distinctHumans.add(steamId);
 }
 
-export function samplePeakHumans(humans: number): void {
+export function samplePeakHumans(humans: number, zombies = 0, map = ""): void {
   ensureDay();
   if (humans > current.peakHumans) current.peakHumans = humans;
+  samplePresence(map, humans, zombies);
+}
+
+/**
+ * Recarrega o dia corrente do banco. Chamado no boot: sem isso um restart às
+ * 22h reportaria "0 kills hoje" com o servidor cheio desde as 18h.
+ */
+export async function hydrateMetrics(): Promise<void> {
+  const totals = await loadDailyTotals();
+  if (!totals) return;
+  ensureDay();
+  current.kills = totals.kills;
+  current.deaths = totals.deaths;
+  current.peakHumans = Math.max(current.peakHumans, totals.peakHumans);
+  current.hydratedDistinct = totals.distinctHumans;
+  // Mesma chave do agregado vivo: kills posteriores somam no jogador certo em
+  // vez de abrirem uma segunda linha no top fragger.
+  current.players = new Map(
+    totals.topFraggers.map(
+      (p) =>
+        [humanKey(p.name, p.steamId), { name: p.name, kills: p.kills, deaths: p.deaths }] as const,
+    ),
+  );
+  current.weapons = new Map(totals.topWeapons);
 }
 
 export function getMetrics() {
@@ -129,7 +165,7 @@ export function getMetrics() {
     deaths: current.deaths,
     chatLines: current.chatLines,
     peakHumans: current.peakHumans,
-    distinctHumans: current.distinctHumans.size,
+    distinctHumans: Math.max(current.distinctHumans.size, current.hydratedDistinct),
     topFraggers,
     topWeapons,
   };

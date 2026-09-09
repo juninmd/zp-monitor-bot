@@ -9,6 +9,9 @@ export interface SteamProfile {
   avatarUrl: string | null;
   /** Avatar baixado, quando o fetch da imagem teve sucesso. */
   avatar: Buffer | null;
+  /** Criação da conta; só visível via API oficial e em perfil público. */
+  createdAt: Date | null;
+  visibility: "public" | "private" | null;
 }
 
 // Avatar "padrão" que a Steam serve para contas sem foto - não vale a foto.
@@ -62,6 +65,8 @@ async function loadProfile(steam64: string): Promise<SteamProfile | null> {
   let realName: string | null = null;
   let countryCode: string | null = null;
   let avatarUrl: string | null = null;
+  let createdAt: Date | null = null;
+  let visibility: SteamProfile["visibility"] = null;
 
   if (config.steamApiKey) {
     const payload = (await fetchJson(
@@ -73,6 +78,11 @@ async function loadProfile(steam64: string): Promise<SteamProfile | null> {
     realName = typeof player.realname === "string" ? player.realname : null;
     countryCode = typeof player.loccountrycode === "string" ? player.loccountrycode : null;
     avatarUrl = typeof player.avatarfull === "string" ? player.avatarfull : null;
+    // timecreated só vem em perfil público; communityvisibilitystate: 3 = público.
+    createdAt = typeof player.timecreated === "number" ? new Date(player.timecreated * 1000) : null;
+    if (typeof player.communityvisibilitystate === "number") {
+      visibility = player.communityvisibilitystate === 3 ? "public" : "private";
+    }
   } else {
     const response = await fetch(`https://steamcommunity.com/profiles/${steam64}/?xml=1`, {
       signal: AbortSignal.timeout(6000),
@@ -92,6 +102,8 @@ async function loadProfile(steam64: string): Promise<SteamProfile | null> {
     countryCode,
     avatarUrl,
     avatar: avatarUrl ? await fetchAvatar(avatarUrl) : null,
+    createdAt,
+    visibility,
   };
 }
 
