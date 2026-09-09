@@ -3,6 +3,7 @@ export type TelegramCommand =
   | { kind: "ask"; question: string }
   | { kind: "status" }
   | { kind: "stats" }
+  | { kind: "ranking" }
   | { kind: "radar" }
   | { kind: "map" }
   | { kind: "audit" }
@@ -16,6 +17,7 @@ export function parseTelegramCommand(text: string): TelegramCommand {
   if (normalized === "/start" || normalized === "/help") return { kind: "help" };
   if (normalized === "/status" || normalized === "/players") return { kind: "status" };
   if (normalized === "/stats" || normalized === "/metrics") return { kind: "stats" };
+  if (normalized === "/ranking" || normalized === "/top") return { kind: "ranking" };
   if (normalized === "/radar") return { kind: "radar" };
   // /map já é troca de mapa auditada; /mapa (ou /print) é o print do mapa.
   if (normalized === "/mapa" || normalized === "/print" || normalized === "/screenshot") {

@@ -3,90 +3,15 @@ import { config } from "./config";
 import type { LogEvent } from "./logParser";
 import { renderMapImage } from "./mapImage";
 import { getMetrics, recordHumanChat, recordHumanSeen, recordKill } from "./metrics";
+import { loadPeakRecord, loadRanking } from "./metricsQueries";
 import { consumeMonitorEvents, monitorState } from "./monitorState";
-import { recordConnect, recordDisconnect } from "./playerStore";
+import { agoText, announceJoin, announceLeave, serverContext } from "./playerAnnounce";
+import { recordDisconnect } from "./playerStore";
 import { renderRadar } from "./radar";
 import { getPositions, getSnapshot, runRconCommand } from "./rcon";
 import { getStats, playerConnected, playerDisconnected } from "./state";
-import { describeSteamId, formatDuration } from "./steamId";
-import { countryFlag, getSteamProfile } from "./steamProfile";
-import { escapeHtml, sendTelegram, sendTelegramPhoto, sendTelegramPhotoTo } from "./telegram";
-
-const BR_TIME = new Intl.DateTimeFormat("pt-BR", {
-  timeZone: "America/Sao_Paulo",
-  dateStyle: "short",
-  timeStyle: "short",
-});
-
-function agoText(date: Date): string {
-  const seconds = Math.max(0, Math.round((Date.now() - date.getTime()) / 1000));
-  return `${BR_TIME.format(date)} (há ${formatDuration(seconds)})`;
-}
-
-/** Contexto vivo do servidor, para a notificação não ser só "fulano entrou". */
-function serverContext(): string[] {
-  const info = monitorState.info;
-  const telemetry = monitorState.telemetry;
-  const lines: string[] = [];
-  if (info) {
-    lines.push(
-      `🗺️ Mapa: <b>${escapeHtml(info.map)}</b> · ${info.players} real(is) + ${info.bots} bots de ${info.maxplayers}`,
-    );
-  }
-  if (telemetry.connected && telemetry.round) {
-    lines.push(
-      `🎮 Modo: <b>${escapeHtml(telemetry.round.mode)}</b> · 🧟 ${telemetry.zombies} x 🧍 ${telemetry.humans}`,
-    );
-  }
-  const others = monitorState.players.map((p) => p.name).filter(Boolean);
-  if (others.length) lines.push(`👥 Outros reais online: ${escapeHtml(others.join(", "))}`);
-  return lines;
-}
-
-async function announceJoin(ev: Extract<LogEvent, { type: "connect" }>): Promise<void> {
-  const steam = describeSteamId(ev.steamId);
-  const history = await recordConnect({ name: ev.name, steamId: ev.steamId, ip: ev.ip });
-
-  const header = history.firstTime
-    ? `🆕 <b>${escapeHtml(ev.name)}</b> entrou — <b>PRIMEIRA VEZ</b> no servidor`
-    : `🟢 <b>${escapeHtml(ev.name)}</b> entrou — ${history.visits + 1}ª visita`;
-
-  const lines = [
-    header,
-    `🆔 <code>${escapeHtml(steam.raw)}</code> · ${escapeHtml(steam.origin)}`,
-    `🌐 IP: <code>${escapeHtml(ev.ip)}</code>`,
-  ];
-  // Foto e dados do perfil público da Steam (nome real, país), quando visíveis.
-  const profile = await getSteamProfile(steam.steam64);
-  if (profile) {
-    if (profile.profileName && profile.profileName !== ev.name) {
-      lines.push(`🎭 Conta: ${escapeHtml(profile.profileName)}`);
-    }
-    if (profile.realName) lines.push(`🧑 ${escapeHtml(profile.realName)}`);
-    if (profile.countryCode) {
-      lines.push(
-        `🌍 ${countryFlag(profile.countryCode)} <code>${escapeHtml(profile.countryCode)}</code>`,
-      );
-    }
-  }
-  if (steam.profileUrl) lines.push(`🔗 <a href="${steam.profileUrl}">Perfil na Steam</a>`);
-  if (!history.firstTime) {
-    if (history.lastSeen) lines.push(`🕘 Última vez: ${escapeHtml(agoText(history.lastSeen))}`);
-    if (history.totalSeconds > 0) {
-      lines.push(`⏱️ Tempo total acumulado: ${formatDuration(history.totalSeconds)}`);
-    }
-    if (history.previousNames.length) {
-      lines.push(`🏷️ Já usou: ${escapeHtml(history.previousNames.join(", "))}`);
-    }
-  }
-  lines.push(...serverContext());
-  const text = lines.join("\n");
-  if (profile?.avatar) {
-    await sendTelegramPhotoTo(config.telegramChatId, profile.avatar, text);
-  } else {
-    sendTelegram(text);
-  }
-}
+import { formatDuration } from "./steamId";
+import { escapeHtml, sendTelegram, sendTelegramPhoto } from "./telegram";
 
 export function handleEvent(ev: LogEvent): void {
   switch (ev.type) {
@@ -104,13 +29,13 @@ export function handleEvent(ev: LogEvent): void {
       const seconds = playerDisconnected(ev.uid, ev.steamId);
       if (ev.steamId !== "BOT") {
         void recordDisconnect(ev.steamId, seconds, ev.reason);
-        const suffix = ev.reason ? ` (${escapeHtml(ev.reason)})` : "";
-        const played = seconds === null ? "" : `\n⏱️ Ficou: ${formatDuration(seconds)}`;
-        const team = ev.team ? `\n🎽 Time: ${escapeHtml(ev.team)}` : "";
-        sendTelegram(
-          `🔴 <b>${escapeHtml(ev.name)}</b> saiu${suffix}\n` +
-            `🆔 <code>${escapeHtml(ev.steamId)}</code>${team}${played}`,
-        );
+        void announceLeave({
+          name: ev.name,
+          steamId: ev.steamId,
+          reason: ev.reason,
+          team: ev.team ?? "",
+          seconds,
+        });
       }
       break;
     }
@@ -180,6 +105,9 @@ export function handleMonitorEvents(): void {
     if (event.kind === "map_change") {
       sendTelegram(`🗺️ Mapa trocou: ${escapeHtml(event.message)}`);
     }
+    if (event.kind === "round_highlight") {
+      sendTelegram(`⚡ ${escapeHtml(event.message)}`);
+    }
     if (event.kind === "server_down") {
       downSince = event.t;
       sendTelegram(`🔴 Servidor ficou inacessível (A2S sem resposta).`);
@@ -214,6 +142,23 @@ function metricsText(): string[] {
   return lines;
 }
 
+/** Ranking da semana e recorde histórico: só existem porque o banco persiste. */
+export async function historyText(): Promise<string[]> {
+  const [ranking, record] = await Promise.all([loadRanking(7, 5), loadPeakRecord()]);
+  const lines: string[] = [];
+  if (ranking.length) {
+    lines.push(
+      `📈 Ranking de 7 dias:\n${ranking
+        .map((r, i) => `${i + 1}. ${escapeHtml(r.name)}: ${r.kills}`)
+        .join("\n")}`,
+    );
+  }
+  if (record) {
+    lines.push(`🏅 Recorde de pico: ${record.humans} humanos (${escapeHtml(agoText(record.at))})`);
+  }
+  return lines;
+}
+
 export async function sendPeriodicStats(): Promise<void> {
   const s = getStats();
   // Bots nunca emitem "connected, address", então nunca chegam no tracker de
@@ -224,6 +169,7 @@ export async function sendPeriodicStats(): Promise<void> {
       `📊 Jogadores reais online: ${s.humans} (bots: ${bots})`,
       `Distintos desde o início do monitor: ${s.distinctPlayersSeen}`,
       ...metricsText(),
+      ...(await historyText()),
       ...serverContext(),
     ].join("\n"),
   );
@@ -252,8 +198,8 @@ export async function sendPeriodicStats(): Promise<void> {
 }
 
 /**
- * Print do mapa (TGA do servidor com posições) quando dá; radar gerado quando
- * o TGA não está acessível; silencioso quando nem jogadores há.
+ * Print do mapa (overview do servidor com posições) quando dá; radar gerado
+ * quando o overview não está acessível; silencioso quando nem jogadores há.
  */
 export async function sendMapSnapshot(): Promise<void> {
   try {

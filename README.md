@@ -15,8 +15,10 @@ Google ADK via LiteLLM, RAG com pgvector e integração Telegram com auditoria.
   Cada gravação gera auditoria e só retorna sucesso depois do embed e upsert no
   pgvector.
 - Segredos ficam em `.env` local ou Kubernetes Secret; nunca na imagem/Git.
-- O print do mapa lê `maps/<mapa>.tga` do pod do servidor via `kubectl exec`;
-  sem kubectl no pod o recurso degrada para o radar gerado localmente.
+- O print do mapa lê o overview (`overviews/<mapa>.txt` + o bitmap do
+  `layer { IMAGE }`) do pod do servidor via `kubectl exec`; sem kubectl o
+  recurso degrada para o radar gerado localmente. O nome do mapa vem do
+  servidor e passa por quoting POSIX antes de entrar no `sh -c`.
 
 ## Telegram
 
@@ -25,9 +27,11 @@ Google ADK via LiteLLM, RAG com pgvector e integração Telegram com auditoria.
 - `/status` ou `/players`: mapa, jogadores e telemetria.
 - `/stats` ou `/metrics`: métricas do dia (kills, mortes, pico de humanos,
   distintos, top fraggers e armas).
+- `/ranking` ou `/top`: ranking de frags dos últimos 7 dias e recorde
+  histórico de humanos simultâneos.
 - `/radar`: posição e direção dos jogadores.
-- `/mapa` ou `/print`: print do mapa atual (TGA do servidor com posições
-  sobrepostas quando a calibração do overview existe; degrada para o radar).
+- `/mapa` ou `/print`: print do mapa atual (overview do servidor com posições
+  sobrepostas quando a calibração existe; degrada para o radar).
 - `/ask <pergunta>` ou texto livre: resposta ADK com contexto recuperado do
   pgvector.
 - `/ask registre na memória que <fato>`: grava o fato via tool e o deixa
@@ -41,12 +45,17 @@ Google ADK via LiteLLM, RAG com pgvector e integração Telegram com auditoria.
 ## Notificações
 
 - Entrada de jogador real com foto do perfil Steam (via `STEAM_API_KEY`, ou o
-  perfil XML público quando a chave não existe), nome real, país e histórico.
+  perfil XML público quando a chave não existe), nome real, país, idade da
+  conta, perfil privado e histórico local.
+- Com `STEAM_API_KEY`, a entrada também traz bans (VAC, game ban, comunidade)
+  e horas em Counter-Strike - ou "nenhum CS na conta" para provável non-steam.
+- Saída de jogador repete foto e contexto do servidor.
 - Chat do jogo só de jogadores reais por padrão (`CHAT_RELAY_BOTS=false`
   descarta falas de bots).
 - Kills/mortes alimentam métricas diárias; morte e pico de humanos são
   amostrados pelo polling.
-- Mapa trocado e servidor que cai/volta são anunciados na hora.
+- Mapa trocado, servidor que cai/volta e eventos frescos da telemetria ZP
+  (no máximo 3 por tick) são anunciados na hora.
 - O resumo periódico inclui métricas, último round e o print do mapa.
 
 ## Desenvolvimento
@@ -62,5 +71,6 @@ docker build -t zp-monitor-bot:local .
 
 Copie `.env.example` para `.env`. O bootstrap espera o database `zplague` com
 a extensão `vector` já habilitada. Na inicialização, cria as tabelas, ingere
-`knowledge/*.md` e só então deixa `/health` pronto. O health expõe os totais
+`knowledge/*.md`, cria `kill_events`/`presence_samples`, reidrata as métricas
+do dia e só então deixa `/health` pronto. O health expõe os totais
 atuais de chunks e de chunks gravados por tool, além do último update.
