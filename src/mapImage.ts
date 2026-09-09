@@ -1,243 +1,133 @@
-import { createCanvas, Image, type SKRSContext2D } from "@napi-rs/canvas";
-import { config } from "./config";
-import { selectLogPod } from "./logTail";
+import { createCanvas, type SKRSContext2D } from "@napi-rs/canvas";
+import { type DecodedImage, decodeImage } from "./imageDecode";
+import { type Overview, parseOverview, projectToPixels } from "./overview";
+import { fetchPodFiles } from "./podFiles";
 import type { RadarPlayer } from "./rcon";
 
 /**
- * "Print do mapa": o servidor CS 1.6 guarda a imagem de radar do mapa como
- * `maps/<mapa>.tga` (mais o `maps/<mapa>.txt` de calibração) no mesmo pod.
- * Lê via kubectl exec, converte TGA->PNG com @napi-rs/canvas e sobrepõe as
- * posições do zp_telemetry_positions. Qualquer passo falho degrada para a
- * imagem do mapa sem overlay; sem TGA devolve null e o caller usa o radar.
+ * "Print do mapa": o servidor CS 1.6 guarda o overview do mapa em
+ * `overviews/<mapa>.txt` (calibração) + o bitmap declarado no `layer { IMAGE }`.
+ * Lê ambos via kubectl exec, decodifica e sobrepõe as posições do
+ * zp_telemetry_positions. Sem bitmap devolve null e o caller usa o radar.
  */
-
-interface OverviewCalibration {
-  posX: number;
-  posY: number;
-  /** Unidades de mundo por pixel (escala da imagem de radar). */
-  scale: number;
-}
-
-const TGA_PATHS = (map: string) => [
-  `cstrike/maps/${map}.tga`,
-  `maps/${map}.tga`,
-  `cstrike/maps/overviews/${map}.tga`,
-  `maps/overviews/${map}.tga`,
-];
-const TXT_PATHS = (map: string) => [
-  `cstrike/maps/${map}.txt`,
-  `maps/${map}.txt`,
-  `cstrike/maps/overviews/${map}.txt`,
-  `maps/overviews/${map}.txt`,
-];
 
 const ZOMBIE_COLOR = "#e74c3c";
 const HUMAN_COLOR = "#3498db";
 
-interface KubectlProc {
-  stdout: ReadableStream<Uint8Array>;
-  exited: Promise<number>;
-  kill: () => void;
+const withPrefixes = (path: string): string[] => [`cstrike/${path}`, path, `valve/${path}`];
+
+const txtCandidates = (map: string): string[] => [
+  ...withPrefixes(`overviews/${map}.txt`),
+  ...withPrefixes(`maps/${map}.txt`),
+];
+
+const imageCandidates = (map: string, declared: string | null): string[] => [
+  ...(declared ? withPrefixes(declared) : []),
+  ...withPrefixes(`overviews/${map}.bmp`),
+  ...withPrefixes(`overviews/${map}.tga`),
+  ...withPrefixes(`maps/${map}.bmp`),
+  ...withPrefixes(`maps/${map}.tga`),
+];
+
+interface MapAssets {
+  overview: Overview | null;
+  image: DecodedImage | null;
 }
 
-/** Captura a saída de um comando kubectl. Rejeita em exit != 0 ou timeout. */
-function kubectlCapture(args: string[], timeoutMs = 6000): Promise<Buffer> {
-  return new Promise((resolve, reject) => {
-    let proc: KubectlProc;
-    try {
-      proc = Bun.spawn(["kubectl", ...args], {
-        stdout: "pipe",
-        stderr: "ignore",
-      }) as unknown as KubectlProc;
-    } catch (error) {
-      reject(error instanceof Error ? error : new Error(String(error)));
-      return;
-    }
-    const chunks: Uint8Array[] = [];
-    const timer = setTimeout(() => {
-      proc.kill();
-      reject(new Error("kubectl timeout"));
-    }, timeoutMs);
-    (async () => {
-      for await (const chunk of proc.stdout) chunks.push(chunk);
-      const code = await proc.exited;
-      clearTimeout(timer);
-      if (code === 0) resolve(Buffer.concat(chunks));
-      else reject(new Error(`kubectl exit ${code}`));
-    })().catch((error) => {
-      clearTimeout(timer);
-      proc.kill();
-      reject(error);
-    });
-  });
-}
+// Overview e bitmap não mudam enquanto o mapa é o mesmo: um miss por mapa.
+const assetCache = new Map<string, MapAssets>();
 
-async function selectPod(): Promise<string | null> {
-  if (!Bun.which("kubectl")) return null;
-  try {
-    const raw = await kubectlCapture([
-      "get",
-      "pods",
-      "-n",
-      config.namespace,
-      "-l",
-      config.podSelector,
-      "-o",
-      "json",
-    ]);
-    const pods = JSON.parse(raw.toString()) as {
-      items: Array<{
-        metadata: { name: string; creationTimestamp?: string; deletionTimestamp?: string };
-        status?: { phase?: string };
-      }>;
-    };
-    return selectLogPod(pods.items) ?? null;
-  } catch {
-    return null;
+async function loadAssets(map: string): Promise<MapAssets> {
+  const cached = assetCache.get(map);
+  if (cached) return cached;
+
+  const [txtRaw, imageRaw] = await fetchPodFiles([txtCandidates(map), imageCandidates(map, null)]);
+  const overview = txtRaw ? parseOverview(txtRaw.toString("utf8")) : null;
+
+  let image = imageRaw ? decodeImage(imageRaw) : null;
+  // O layer pode apontar para um bitmap fora dos nomes-padrão que já tentamos.
+  const declared = overview?.kind === "goldsrc" ? overview.image : null;
+  if (!image && declared) {
+    const [fallback] = await fetchPodFiles([withPrefixes(declared)]);
+    image = fallback ? decodeImage(fallback) : null;
   }
+
+  const assets: MapAssets = { overview, image };
+  // Só memoriza sucesso: um pod fora do ar não deve congelar "sem mapa".
+  if (image) assetCache.set(map, assets);
+  return assets;
 }
 
-const shellQuote = (s: string): string => `'${s.replace(/'/g, `'\\''`)}'`;
+export function clearMapAssetCache(): void {
+  assetCache.clear();
+}
 
-async function fetchViaPod(paths: string[]): Promise<Buffer | null> {
-  if (!Bun.which("kubectl")) return null;
-  const pod = await selectPod();
-  if (!pod) return null;
-  const probe = paths.map((p) => `base64 -w0 ${shellQuote(p)} 2>/dev/null`).join(" || ");
-  if (!probe) return null;
-  try {
-    const out = await kubectlCapture([
-      "exec",
-      "-n",
-      config.namespace,
-      pod,
-      "-c",
-      config.container,
-      "--",
-      "sh",
-      "-c",
-      probe,
-    ]);
-    const b64 = out.toString("utf8").trim();
-    if (!b64) return null;
-    return Buffer.from(b64, "base64");
-  } catch {
-    return null;
+function drawPlayer(ctx: SKRSContext2D, px: number, py: number, p: RadarPlayer, r: number): void {
+  const isZombie = p.team === "z";
+  const color = isZombie ? ZOMBIE_COLOR : HUMAN_COLOR;
+  const rad = (p.angle * Math.PI) / 180;
+  ctx.strokeStyle = color;
+  ctx.lineWidth = Math.max(2, Math.round(r / 3));
+  ctx.beginPath();
+  ctx.moveTo(px, py);
+  ctx.lineTo(px + Math.cos(rad) * r * 2, py - Math.sin(rad) * r * 2);
+  ctx.stroke();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  if (isZombie) {
+    ctx.moveTo(px, py - r);
+    ctx.lineTo(px + r, py + r);
+    ctx.lineTo(px - r, py + r);
+    ctx.closePath();
+  } else {
+    ctx.arc(px, py, r * 0.9, 0, Math.PI * 2);
   }
+  ctx.fill();
 }
 
-/**
- * Converte um TGA true-color (24/32bpp) para PNG. Overviews do GoldSrc são
- * salvas sem compressão (type 2); outros tipos retornam null.
- */
-export function tgaToPng(buffer: Buffer): Buffer | null {
-  if (buffer.length < 18 || buffer[2] !== 2) return null;
-  const bpp = buffer[16];
-  if (bpp !== 24 && bpp !== 32) return null;
-  const width = buffer.readUInt16LE(12);
-  const height = buffer.readUInt16LE(14);
-  if (!width || !height) return null;
-  const topOrigin = ((buffer[17] ?? 0) & 0x20) !== 0;
-  const stride = bpp / 8;
-  const dataStart = 18 + (buffer[0] ?? 0) + (buffer[1] ? 768 : 0);
-  if (buffer.length < dataStart + width * height * stride) return null;
-
-  const canvas = createCanvas(width, height);
-  const ctx = canvas.getContext("2d");
-  const image = ctx.createImageData(width, height);
-  for (let y = 0; y < height; y++) {
-    const srcRow = topOrigin ? y : height - 1 - y;
-    for (let x = 0; x < width; x++) {
-      const src = dataStart + (srcRow * width + x) * stride;
-      const dst = (y * width + x) * 4;
-      image.data[dst] = (buffer[src + 2] ?? 0) as number;
-      image.data[dst + 1] = (buffer[src + 1] ?? 0) as number;
-      image.data[dst + 2] = (buffer[src] ?? 0) as number;
-      image.data[dst + 3] = bpp === 32 ? ((buffer[src + 3] ?? 255) as number) : 255;
-    }
-  }
-  ctx.putImageData(image, 0, 0);
-  return canvas.toBuffer("image/png");
-}
-
-/**
- * Lê a calibração do overview: `"pos_x" "-2476"`, `"pos_y" "1762"`,
- * `"scale" "4.11"` (unidades de mundo por pixel) no primeiro bloco do txt.
- */
-export function parseOverviewTxt(txt: string): OverviewCalibration | null {
-  const numberKey = (key: string): number | null => {
-    const m = txt.match(new RegExp(`"${key}"\\s*"(-?\\d+(?:\\.\\d+)?)"`));
-    return m ? Number(m[1]) : null;
-  };
-  const posX = numberKey("pos_x");
-  const posY = numberKey("pos_y");
-  const scale = numberKey("scale") ?? numberKey("world_to_scale");
-  if (posX === null || posY === null || !scale || scale <= 0) return null;
-  return { posX, posY, scale };
-}
-
-function overlayPlayers(
-  ctx: SKRSContext2D,
-  width: number,
-  height: number,
-  players: RadarPlayer[],
-  cal: OverviewCalibration,
-): void {
-  const toScreen = (p: RadarPlayer): [number, number] | null => {
-    const sx = (p.x - cal.posX) / cal.scale;
-    const sy = (p.y - cal.posY) / cal.scale;
-    if (sx < 0 || sy < 0 || sx >= width || sy >= height) return null;
-    return [sx, sy];
-  };
-
-  const r = Math.max(5, Math.round(Math.min(width, height) / 90));
-  for (const p of players) {
-    const at = toScreen(p);
-    if (!at) continue;
-    const [sx, sy] = at;
-    const isZombie = p.team === "z";
-    const color = isZombie ? ZOMBIE_COLOR : HUMAN_COLOR;
-    const rad = (p.angle * Math.PI) / 180;
-    ctx.strokeStyle = color;
-    ctx.lineWidth = Math.max(2, Math.round(r / 3));
-    ctx.beginPath();
-    ctx.moveTo(sx, sy);
-    ctx.lineTo(sx + Math.cos(rad) * r * 2, sy - Math.sin(rad) * r * 2);
-    ctx.stroke();
-    ctx.fillStyle = color;
-    ctx.beginPath();
-    if (isZombie) {
-      ctx.moveTo(sx, sy - r);
-      ctx.lineTo(sx + r, sy + r);
-      ctx.lineTo(sx - r, sy + r);
-      ctx.closePath();
-    } else {
-      ctx.arc(sx, sy, r * 0.9, 0, Math.PI * 2);
-    }
-    ctx.fill();
-  }
+/** Placar 🧟×🧍 no canto, para o print valer sozinho sem a legenda do caption. */
+function drawScoreboard(ctx: SKRSContext2D, width: number, players: RadarPlayer[]): void {
+  const zombies = players.filter((p) => p.team === "z").length;
+  const humans = players.length - zombies;
+  const pad = Math.max(6, Math.round(width / 80));
+  const size = Math.max(12, Math.round(width / 32));
+  ctx.font = `bold ${size}px sans-serif`;
+  ctx.textBaseline = "top";
+  const label = `${zombies} x ${humans}`;
+  const boxWidth = ctx.measureText(label).width + pad * 3 + size;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(pad, pad, boxWidth, size + pad * 2);
+  ctx.fillStyle = ZOMBIE_COLOR;
+  ctx.fillText(String(zombies), pad * 2, pad * 2);
+  const zombieWidth = ctx.measureText(String(zombies)).width;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(" x ", pad * 2 + zombieWidth, pad * 2);
+  ctx.fillStyle = HUMAN_COLOR;
+  ctx.fillText(String(humans), pad * 2 + zombieWidth + ctx.measureText(" x ").width, pad * 2);
 }
 
 /**
  * Print do mapa com posições sobrepostas quando a calibração existe; só a
- * imagem do mapa quando não; null quando o TGA nem está disponível.
+ * imagem do mapa quando não; null quando nem o bitmap está disponível.
  */
 export async function renderMapImage(map: string, players: RadarPlayer[]): Promise<Buffer | null> {
   if (!map) return null;
-  const [tga, txt] = await Promise.all([fetchViaPod(TGA_PATHS(map)), fetchViaPod(TXT_PATHS(map))]);
-  if (!tga) return null;
+  const { overview, image } = await loadAssets(map);
+  if (!image) return null;
 
-  const base = tgaToPng(tga);
-  if (!base) return null;
-
-  const cal = txt ? parseOverviewTxt(txt.toString("utf8")) : null;
-  if (!cal || players.length === 0) return base;
-
-  const canvas = createCanvas(tga.readUInt16LE(12), tga.readUInt16LE(14));
+  const canvas = createCanvas(image.width, image.height);
   const ctx = canvas.getContext("2d");
-  const img = new Image();
-  img.src = base;
-  ctx.drawImage(img, 0, 0);
-  overlayPlayers(ctx, canvas.width, canvas.height, players, cal);
+  const base = ctx.createImageData(image.width, image.height);
+  base.data.set(image.rgba);
+  ctx.putImageData(base, 0, 0);
+
+  if (overview && players.length > 0) {
+    const r = Math.max(5, Math.round(Math.min(image.width, image.height) / 90));
+    for (const p of players) {
+      const at = projectToPixels(overview, p.x, p.y, image.width, image.height);
+      if (at) drawPlayer(ctx, at[0], at[1], p, r);
+    }
+    drawScoreboard(ctx, image.width, players);
+  }
   return canvas.toBuffer("image/png");
 }
