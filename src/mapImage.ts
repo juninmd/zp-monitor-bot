@@ -114,25 +114,86 @@ function drawPlayer(ctx: SKRSContext2D, px: number, py: number, p: RadarPlayer, 
   ctx.fill();
 }
 
-/** Placar 🧟×🧍 no canto, para o print valer sozinho sem a legenda do caption. */
+/** Triângulo (zumbi) ou círculo (humano), sem direção, para legenda/placar. */
+function drawLegendGlyph(
+  ctx: SKRSContext2D,
+  cx: number,
+  cy: number,
+  size: number,
+  zombie: boolean,
+): void {
+  ctx.fillStyle = zombie ? ZOMBIE_COLOR : HUMAN_COLOR;
+  ctx.beginPath();
+  if (zombie) {
+    ctx.moveTo(cx, cy - size * 0.4);
+    ctx.lineTo(cx + size * 0.4, cy + size * 0.35);
+    ctx.lineTo(cx - size * 0.4, cy + size * 0.35);
+    ctx.closePath();
+  } else {
+    ctx.arc(cx, cy, size * 0.34, 0, Math.PI * 2);
+  }
+  ctx.fill();
+}
+
+/**
+ * Placar no canto com os mesmos marcadores do mapa (▲ zumbi, ● humano), para o
+ * print dizer sozinho o que cada número significa - a legenda do caption some
+ * quando a foto é encaminhada.
+ */
 function drawScoreboard(ctx: SKRSContext2D, width: number, players: RadarPlayer[]): void {
   const zombies = players.filter((p) => p.team === "z").length;
   const humans = players.length - zombies;
   const pad = Math.max(6, Math.round(width / 80));
   const size = Math.max(12, Math.round(width / 32));
+  const gap = Math.max(4, Math.round(size / 4));
   ctx.font = `bold ${size}px sans-serif`;
-  ctx.textBaseline = "top";
-  const label = `${zombies} x ${humans}`;
-  const boxWidth = ctx.measureText(label).width + pad * 3 + size;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+
+  const zText = String(zombies);
+  const hText = String(humans);
+  const xText = " x ";
+  const zWidth = ctx.measureText(zText).width;
+  const hWidth = ctx.measureText(hText).width;
+  const xWidth = ctx.measureText(xText).width;
+  const content = size + gap + zWidth + gap + xWidth + gap + size + gap + hWidth;
+  const boxWidth = content + pad * 2;
+  const boxHeight = size + pad * 2;
   ctx.fillStyle = "rgba(0,0,0,0.55)";
-  ctx.fillRect(pad, pad, boxWidth, size + pad * 2);
+  ctx.fillRect(pad, pad, boxWidth, boxHeight);
+
+  const midY = pad + boxHeight / 2;
+  let x = pad;
+  drawLegendGlyph(ctx, x + size / 2, midY, size, true);
+  x += size + gap;
   ctx.fillStyle = ZOMBIE_COLOR;
-  ctx.fillText(String(zombies), pad * 2, pad * 2);
-  const zombieWidth = ctx.measureText(String(zombies)).width;
+  ctx.fillText(zText, x, midY);
+  x += zWidth + gap;
   ctx.fillStyle = "#ffffff";
-  ctx.fillText(" x ", pad * 2 + zombieWidth, pad * 2);
+  ctx.fillText(xText, x, midY);
+  x += xWidth + gap;
+  drawLegendGlyph(ctx, x + size / 2, midY, size, false);
+  x += size + gap;
   ctx.fillStyle = HUMAN_COLOR;
-  ctx.fillText(String(humans), pad * 2 + zombieWidth + ctx.measureText(" x ").width, pad * 2);
+  ctx.fillText(hText, x, midY);
+}
+
+/** Nome do mapa no canto inferior direito, para o print não depender do caption. */
+function drawMapLabel(ctx: SKRSContext2D, width: number, height: number, map: string): void {
+  const pad = Math.max(6, Math.round(width / 80));
+  const size = Math.max(12, Math.round(width / 40));
+  ctx.font = `bold ${size}px sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  const textWidth = ctx.measureText(map).width;
+  const boxWidth = textWidth + pad * 2;
+  const boxHeight = size + pad;
+  const x = width - boxWidth - pad;
+  const y = height - boxHeight - pad;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(x, y, boxWidth, boxHeight);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(map, x + pad, y + boxHeight / 2);
 }
 
 /**
@@ -161,5 +222,6 @@ export async function renderMapImage(map: string, players: RadarPlayer[]): Promi
     }
     drawScoreboard(ctx, image.width, players);
   }
+  drawMapLabel(ctx, image.width, image.height, map);
   return canvas.toBuffer("image/png");
 }

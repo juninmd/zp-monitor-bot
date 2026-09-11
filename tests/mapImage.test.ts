@@ -128,6 +128,27 @@ describe("renderMapImage", () => {
     }
   });
 
+  test("estampa o nome do mapa no canto para o print valer sozinho", async () => {
+    // Sem o caption (foto encaminhada) o nome do mapa some; ele vai na imagem.
+    clearMapAssetCache();
+    const png = await renderMapImage("zm_label", []);
+    expect(png).not.toBeNull();
+    const { loadImage, createCanvas } = await import("@napi-rs/canvas");
+    const img = await loadImage(png as Buffer);
+    const canvas = createCanvas(img.width, img.height);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    const region = ctx.getImageData(img.width - 80, img.height - 40, 80, 40).data;
+    let hasWhite = false;
+    for (let i = 0; i < region.length; i += 4) {
+      if ((region[i] ?? 0) > 200 && (region[i + 1] ?? 0) > 200 && (region[i + 2] ?? 0) > 200) {
+        hasWhite = true;
+        break;
+      }
+    }
+    expect(hasWhite).toBe(true);
+  });
+
   test("trocar de mapa não acumula o RGBA do anterior em cache", async () => {
     clearMapAssetCache();
     fetched = [];
