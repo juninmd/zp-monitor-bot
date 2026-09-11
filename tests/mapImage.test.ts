@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from "bun:test";
 
 /** BMP BI_RGB 24bpp bottom-up de cor sólida, como o overview do CS 1.6. */
-function buildBmp(width: number, height: number): Buffer {
+function buildBmp(width: number, height: number, bgr?: [number, number, number]): Buffer {
   const rowSize = Math.ceil((width * 24) / 32) * 4;
   const buffer = Buffer.alloc(54 + rowSize * height);
   buffer.write("BM", 0, "ascii");
@@ -12,9 +12,20 @@ function buildBmp(width: number, height: number): Buffer {
   buffer.writeInt32LE(height, 22);
   buffer.writeUInt16LE(1, 26);
   buffer.writeUInt16LE(24, 28);
-  buffer.fill(0x40, 54);
+  if (!bgr) {
+    buffer.fill(0x40, 54);
+    return buffer;
+  }
+  for (let offset = 54; offset + 2 < buffer.length; offset += 3) {
+    buffer[offset] = bgr[0];
+    buffer[offset + 1] = bgr[1];
+    buffer[offset + 2] = bgr[2];
+  }
   return buffer;
 }
+
+/** Quando true, o bitmap do pod é verde puro: a cor-chave do overview. */
+let chromaKeyBitmap = false;
 
 const OVERVIEW_TXT = `global
 {
@@ -43,7 +54,9 @@ mock.module("../src/podFiles", () => ({
   fetchPodFiles: async (groups: string[][]) => {
     fetched.push(groups);
     return groups.map((paths) => {
-      if (!paths.some((p) => p.endsWith(".txt"))) return buildBmp(128, 96);
+      if (!paths.some((p) => p.endsWith(".txt"))) {
+        return buildBmp(128, 96, chromaKeyBitmap ? [0, 255, 0] : undefined);
+      }
       return overviewAvailable ? Buffer.from(OVERVIEW_TXT, "utf8") : null;
     });
   },
@@ -93,6 +106,47 @@ describe("renderMapImage", () => {
     } finally {
       overviewAvailable = true;
     }
+  });
+
+  test("verde puro do overview vira fundo escuro, não placa verde", async () => {
+    // O engine trata (0,255,0) como transparente; num PNG cru ele apareceria.
+    clearMapAssetCache();
+    chromaKeyBitmap = true;
+    try {
+      const png = await renderMapImage("zm_chroma", []);
+      expect(png).not.toBeNull();
+      const { loadImage, createCanvas } = await import("@napi-rs/canvas");
+      const img = await loadImage(png as Buffer);
+      const canvas = createCanvas(img.width, img.height);
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0);
+      const [r, g, b] = ctx.getImageData(4, 4, 1, 1).data;
+      expect(g).toBeLessThan(180);
+      expect(Math.max(r as number, g as number, b as number)).toBeLessThan(60);
+    } finally {
+      chromaKeyBitmap = false;
+    }
+  });
+
+  test("estampa o nome do mapa no canto para o print valer sozinho", async () => {
+    // Sem o caption (foto encaminhada) o nome do mapa some; ele vai na imagem.
+    clearMapAssetCache();
+    const png = await renderMapImage("zm_label", []);
+    expect(png).not.toBeNull();
+    const { loadImage, createCanvas } = await import("@napi-rs/canvas");
+    const img = await loadImage(png as Buffer);
+    const canvas = createCanvas(img.width, img.height);
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(img, 0, 0);
+    const region = ctx.getImageData(img.width - 80, img.height - 40, 80, 40).data;
+    let hasWhite = false;
+    for (let i = 0; i < region.length; i += 4) {
+      if ((region[i] ?? 0) > 200 && (region[i + 1] ?? 0) > 200 && (region[i + 2] ?? 0) > 200) {
+        hasWhite = true;
+        break;
+      }
+    }
+    expect(hasWhite).toBe(true);
   });
 
   test("trocar de mapa não acumula o RGBA do anterior em cache", async () => {
