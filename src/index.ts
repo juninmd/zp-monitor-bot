@@ -15,6 +15,7 @@ import { handleTelegramText, startTelegramBot } from "./telegramBot";
 
 let ready = false;
 let knowledgeChunks = 0;
+const startedAt = Date.now();
 
 function authorized(request: Request): boolean {
   const provided = request.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ?? "";
@@ -34,6 +35,7 @@ const app = new Elysia()
     return {
       ok,
       database,
+      uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
       knowledgeIngestedAtBoot: knowledgeChunks,
       knowledge: database ? await knowledgeStats() : null,
     };
@@ -105,11 +107,21 @@ async function bootstrap(): Promise<void> {
   setInterval(() => void sendPeriodicStats(), config.statsIntervalMin * 60 * 1000);
 }
 
-// Kills ficam até 10s em buffer: descarrega antes do pod morrer.
+// Kills ficam até 10s em buffer: descarrega antes do pod morrer. Marcar
+// ready=false tira o pod do balanceamento (readiness 503) durante o dreno.
+let shuttingDown = false;
+async function shutdown(): Promise<void> {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  ready = false;
+  await flushKills().catch(() => {});
+  try {
+    await app.stop();
+  } catch {}
+}
+
 for (const signal of ["SIGTERM", "SIGINT"] as const) {
-  process.on(signal, () => {
-    void flushKills().finally(() => process.exit(0));
-  });
+  process.on(signal, () => void shutdown().finally(() => process.exit(0)));
 }
 
 bootstrap().catch((error) => {
