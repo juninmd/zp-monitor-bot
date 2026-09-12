@@ -35,6 +35,7 @@ const app = new Elysia()
     return {
       ok,
       database,
+      revision: process.env.GIT_SHA ?? "dev",
       uptimeSeconds: Math.round((Date.now() - startedAt) / 1000),
       knowledgeIngestedAtBoot: knowledgeChunks,
       knowledge: database ? await knowledgeStats() : null,

@@ -5,7 +5,9 @@ RUN bun install --frozen-lockfile --production --omit=peer
 
 FROM oven/bun:1.3.13-slim
 WORKDIR /app
+ARG GIT_SHA=dev
 ENV NODE_ENV=production
+ENV GIT_SHA=$GIT_SHA
 COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json bun.lock ./
 COPY src ./src
