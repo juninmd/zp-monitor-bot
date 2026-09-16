@@ -110,21 +110,10 @@ function pushHistory(cap: number): void {
 }
 
 export interface MonitorEvent {
-  kind: "map_change" | "server_down" | "server_up" | "round_highlight";
+  kind: "map_change" | "server_down" | "server_up";
   message: string;
   t: number;
 }
-
-/**
- * Quantos eventos frescos da telemetria viram aviso por tick. A lista do
- * zp_telemetry_snapshot já é curada pelo plugin (é o mesmo feed do resumo),
- * então não filtramos por `kind` - as strings vivem no .sma, fora deste repo.
- * O teto existe só para um plugin tagarela não virar flood no Telegram.
- */
-const HIGHLIGHTS_PER_TICK = 3;
-// Na primeira leitura tudo é "fresco": semeia em silêncio para o restart não
-// reanunciar eventos velhos que o plugin ainda tem em buffer.
-let telemetrySeeded = false;
 
 export const monitorEvents: MonitorEvent[] = [];
 const MONITOR_EVENTS_CAP = 50;
@@ -270,20 +259,10 @@ async function pollTelemetry(runRcon: RconRunner, broadcast: () => void): Promis
       monitorState.telemetry.events.map((event) => `${event.t}:${event.message}`),
     );
     const fresh = snapshot.events.filter((event) => !known.has(`${event.t}:${event.message}`));
-    // Nemesis, Survivor e afins acontecem uma vez por round: avisar só no
-    // resumo de 30min faz o Telegram contar a novidade tarde demais.
-    for (const event of telemetrySeeded ? fresh.slice(0, HIGHLIGHTS_PER_TICK) : []) {
-      pushMonitorEvent({
-        kind: "round_highlight",
-        message: event.kind ? `${event.kind}: ${event.message}` : event.message,
-        t: Date.now(),
-      });
-    }
     monitorState.telemetry.events = [...fresh.reverse(), ...monitorState.telemetry.events].slice(
       0,
       100,
     );
-    telemetrySeeded = true;
   } catch (error) {
     monitorState.telemetry.connected = false;
     monitorState.telemetry.lastError = errorMessage(error);

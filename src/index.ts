@@ -7,10 +7,9 @@ import { startLogTail } from "./logTail";
 import { hydrateMetrics } from "./metrics";
 import { flushKills, initializeMetricsTables } from "./metricsStore";
 import { monitorState, startMonitor } from "./monitorState";
-import { handleEvent, handleMonitorEvents, sendPeriodicStats } from "./notifier";
+import { handleEvent, handleMonitorEvents } from "./notifier";
 import { runRconCommand } from "./rcon";
 import { getStats } from "./state";
-import { sendTelegram } from "./telegram";
 import { handleTelegramText, startTelegramBot } from "./telegramBot";
 
 let ready = false;
@@ -88,7 +87,6 @@ async function bootstrap(): Promise<void> {
   console.log(
     `[monitor-bot] http://0.0.0.0:${app.server?.port} | knowledge_ingested=${knowledgeChunks}`,
   );
-  sendTelegram(`🤖 Monitor ZP iniciado: A2S, RCON, RAG/pgvector e auditoria ativos.`);
   startMonitor(
     {
       host: config.serverHost,
@@ -105,7 +103,6 @@ async function bootstrap(): Promise<void> {
   if (config.telegramPollingEnabled) void startTelegramBot();
   // Transições detectadas pelo polling (mapa trocou, servidor caiu/voltou).
   setInterval(() => handleMonitorEvents(), 2000);
-  setInterval(() => void sendPeriodicStats(), config.statsIntervalMin * 60 * 1000);
 }
 
 // Kills ficam até 10s em buffer: descarrega antes do pod morrer. Marcar

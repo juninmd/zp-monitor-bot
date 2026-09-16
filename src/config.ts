@@ -25,7 +25,6 @@ export const config = {
   // CHAT_RELAY_BOTS=true religa o repasse de falas de bots.
   steamApiKey: process.env.STEAM_API_KEY ?? "",
   chatRelayBots: (process.env.CHAT_RELAY_BOTS ?? "false") === "true",
-  statsIntervalMin: positiveNumber("STATS_INTERVAL_MIN", "30"),
   port: positiveNumber("PORT", "8091"),
   serverHost: process.env.SERVER_HOST ?? "cs16-server-udp.server-do-junin.svc.cluster.local",
   serverPort: positiveNumber("SERVER_PORT", "27015"),

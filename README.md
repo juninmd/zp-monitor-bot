@@ -54,9 +54,9 @@ Google ADK via LiteLLM, RAG com pgvector e integração Telegram com auditoria.
   descarta falas de bots).
 - Kills/mortes alimentam métricas diárias; morte e pico de humanos são
   amostrados pelo polling.
-- Mapa trocado, servidor que cai/volta e eventos frescos da telemetria ZP
-  (no máximo 3 por tick) são anunciados na hora.
-- O resumo periódico inclui métricas, último round e o print do mapa.
+- Mapa trocado e servidor que cai/volta (crash) são anunciados na hora.
+- Sem resumo periódico: métricas, ranking, radar e print do mapa saem sob
+  demanda via `/status`, `/stats`, `/ranking`, `/radar` e `/mapa`.
 
 ## Desenvolvimento
 
