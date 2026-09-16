@@ -112,6 +112,8 @@ function pushHistory(cap: number): void {
 export interface MonitorEvent {
   kind: "map_change" | "server_down" | "server_up";
   message: string;
+  /** Mapa novo, só em map_change. */
+  map?: string;
   t: number;
 }
 
@@ -212,6 +214,7 @@ async function pollA2s(options: MonitorOptions, broadcast: () => void): Promise<
       pushMonitorEvent({
         kind: "map_change",
         message: `${lastMap} → ${result.map}`,
+        map: result.map,
         t: Date.now(),
       });
     }

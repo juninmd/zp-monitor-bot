@@ -44,17 +44,18 @@ Google ADK via LiteLLM, RAG com pgvector e integração Telegram com auditoria.
 
 ## Notificações
 
-- Entrada de jogador real com foto do perfil Steam (via `STEAM_API_KEY`, ou o
-  perfil XML público quando a chave não existe), nome real, país, idade da
-  conta, perfil privado e histórico local.
-- Com `STEAM_API_KEY`, a entrada também traz bans (VAC, game ban, comunidade)
-  e horas em Counter-Strike - ou "nenhum CS na conta" para provável non-steam.
-- Saída de jogador repete foto e contexto do servidor.
-- Chat do jogo só de jogadores reais por padrão (`CHAT_RELAY_BOTS=false`
-  descarta falas de bots).
-- Kills/mortes alimentam métricas diárias; morte e pico de humanos são
-  amostrados pelo polling.
-- Mapa trocado e servidor que cai/volta (crash) são anunciados na hora.
+O canal recebe apenas:
+
+- Entrada de jogador real: foto do perfil Steam (via `STEAM_API_KEY`, ou o
+  perfil XML público), SteamID, nome e link do perfil.
+- Saída de jogador real: SteamID, motivo e tempo que ficou.
+- Entrada e saída trazem a quantidade de jogadores (reais + bots) e o mapa.
+- Chat do jogo (e respostas da IA) só de jogadores reais por padrão
+  (`CHAT_RELAY_BOTS=false` descarta falas de bots).
+- Troca de mapa com o print do overview (texto se o overview não existir).
+
+Queda/volta do servidor e ações da IA (respawn, AP, troca de mapa) vão só
+para o log. Kills e pico de humanos seguem alimentando as métricas.
 - Sem resumo periódico: métricas, ranking, radar e print do mapa saem sob
   demanda via `/status`, `/stats`, `/ranking`, `/radar` e `/mapa`.
 

@@ -2,7 +2,7 @@ import { FunctionTool } from "@google/adk";
 import { z } from "zod";
 import { config } from "../config";
 import { runRconCommand } from "../rcon";
-import { escapeHtml, sendTelegram } from "../telegram";
+import { escapeHtml, type sendTelegram } from "../telegram";
 import { remainingMin, tryConsume } from "./cooldowns";
 
 // The HLDS console splits on ";" and does not strip a second layer of
@@ -27,7 +27,8 @@ interface PlayerToolDependencies {
 
 const productionDependencies: PlayerToolDependencies = {
   runRcon: runRconCommand,
-  notify: sendTelegram,
+  // Ações da IA ficam só no log: o canal do Telegram é restrito a entrada/saída, chat e mapa.
+  notify: (text) => console.info("[agent]", text),
   consume: tryConsume,
   cooldownRemaining: remainingMin,
 };

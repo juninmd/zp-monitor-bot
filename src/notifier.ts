@@ -1,6 +1,7 @@
 import { handlePlayerMessage, sanitizeChatReply } from "./agent/agent";
 import { config } from "./config";
 import type { LogEvent } from "./logParser";
+import { renderMapImage } from "./mapImage";
 import { recordHumanChat, recordHumanSeen, recordKill } from "./metrics";
 import { loadPeakRecord, loadRanking } from "./metricsQueries";
 import { consumeMonitorEvents } from "./monitorState";
@@ -8,8 +9,7 @@ import { agoText, announceJoin, announceLeave } from "./playerAnnounce";
 import { recordDisconnect } from "./playerStore";
 import { runRconCommand } from "./rcon";
 import { playerConnected, playerDisconnected } from "./state";
-import { formatDuration } from "./steamId";
-import { escapeHtml, sendTelegram } from "./telegram";
+import { escapeHtml, sendTelegram, sendTelegramPhoto } from "./telegram";
 
 export function handleEvent(ev: LogEvent): void {
   switch (ev.type) {
@@ -31,7 +31,6 @@ export function handleEvent(ev: LogEvent): void {
           name: ev.name,
           steamId: ev.steamId,
           reason: ev.reason,
-          team: ev.team ?? "",
           seconds,
         });
       }
@@ -95,27 +94,25 @@ async function handleAgentReply(ev: Extract<LogEvent, { type: "say" }>): Promise
   }
 }
 
-let downSince: number | null = null;
-
-/** Consome as transições detectadas pelo polling e avisa no Telegram. */
+/** Consome as transições do polling; só a troca de mapa vira aviso, com o print. */
 export function handleMonitorEvents(): void {
   for (const event of consumeMonitorEvents()) {
-    if (event.kind === "map_change") {
-      sendTelegram(`🗺️ Mapa trocou: ${escapeHtml(event.message)}`);
-    }
-    if (event.kind === "server_down") {
-      downSince = event.t;
-      sendTelegram(`🔴 Servidor ficou inacessível (A2S sem resposta).`);
-    }
-    if (event.kind === "server_up") {
-      const down =
-        downSince !== null
-          ? ` · ficou ${formatDuration(Math.max(0, Math.round((event.t - downSince) / 1000)))} fora`
-          : "";
-      sendTelegram(`🟢 Servidor voltou ao ar${down}.`);
-      downSince = null;
-    }
+    if (event.kind === "map_change") void announceMapChange(event.message, event.map ?? "");
   }
+}
+
+async function announceMapChange(transition: string, map: string): Promise<void> {
+  const caption = `🗺️ Mapa trocou: ${escapeHtml(transition)}`;
+  try {
+    const png = await renderMapImage(map, []);
+    if (png) {
+      await sendTelegramPhoto(png, caption);
+      return;
+    }
+  } catch (err) {
+    console.error("[notifier] map image failed", err);
+  }
+  sendTelegram(caption);
 }
 
 /** Ranking da semana e recorde histórico: só existem porque o banco persiste. */
