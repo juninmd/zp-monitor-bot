@@ -47,8 +47,12 @@ Google ADK via LiteLLM, RAG com pgvector e integração Telegram com auditoria.
 O canal recebe apenas:
 
 - Entrada de jogador real: foto do perfil Steam (via `STEAM_API_KEY`, ou o
-  perfil XML público), SteamID, nome e link do perfil.
-- Saída de jogador real: SteamID, motivo e tempo que ficou.
+  perfil XML público), SteamID, origem (Steam ou id ReUnion non-Steam), nome e
+  link do perfil. Com banco, inclui visitas acumuladas (ex.: "6ª visita" +
+  último visto), "Primeira vez no servidor", tempo total jogado e nicks
+  anteriores; sem banco, o aviso sai sem essas linhas.
+- Saída de jogador real: mesmo perfil/origem/avatar da entrada, motivo e tempo
+  que ficou.
 - Entrada e saída trazem a quantidade de jogadores (reais + bots) e o mapa.
 - Chat do jogo (e respostas da IA) só de jogadores reais por padrão
   (`CHAT_RELAY_BOTS=false` descarta falas de bots).

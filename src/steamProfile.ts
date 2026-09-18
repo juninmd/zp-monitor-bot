@@ -33,8 +33,30 @@ export function parseProfileXml(xml: string): {
   countryCode: string | null;
   avatarUrl: string | null;
 } {
-  const tag = (name: string): string | null =>
-    xml.match(new RegExp(`<${name}>([^<]*)</${name}>`))?.[1]?.trim() || null;
+  const entities: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'" };
+  const tag = (name: string): string | null => {
+    const content = xml.match(
+      new RegExp(`<${name}>((?:<!\\[CDATA\\[[\\s\\S]*?\\]\\]>|[^<])*)</${name}>`),
+    )?.[1];
+    if (!content) return null;
+    return (
+      content
+        .replace(
+          /<!\[CDATA\[([\s\S]*?)\]\]>|&(#x[\da-fA-F]+|#\d+|amp|lt|gt|quot|apos);/g,
+          (match: string, cdata: string | undefined, entity: string) => {
+            if (cdata !== undefined) return cdata;
+            if (!entity.startsWith("#")) return entities[entity] ?? match;
+            const code = entity.startsWith("#x")
+              ? Number.parseInt(entity.slice(2), 16)
+              : Number(entity.slice(1));
+            return code > 0 && code <= 0x10ffff && !(code >= 0xd800 && code <= 0xdfff)
+              ? String.fromCodePoint(code)
+              : match;
+          },
+        )
+        .trim() || null
+    );
+  };
   return {
     profileName: tag("steamID"),
     realName: tag("realName"),

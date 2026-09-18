@@ -9,7 +9,7 @@
 import { config } from "./config";
 import type { LogEvent } from "./logParser";
 import { monitorState } from "./monitorState";
-import { recordConnect } from "./playerStore";
+import { type PlayerHistory, recordConnect, UNKNOWN_HISTORY } from "./playerStore";
 import { getStats } from "./state";
 import { describeSteamId, formatDuration } from "./steamId";
 import { getSteamProfile, type SteamProfile } from "./steamProfile";
@@ -48,7 +48,10 @@ export function joinLines(
   profileUrl: string | null,
   profile: SteamProfile | null,
 ): string[] {
-  const lines = [`🆔 <code>${escapeHtml(steamRaw)}</code>`];
+  const lines = [
+    `🆔 <code>${escapeHtml(steamRaw)}</code>`,
+    `Origem: ${escapeHtml(describeSteamId(steamRaw).origin)}`,
+  ];
   if (profile?.profileName) lines.push(`🎭 Perfil: ${escapeHtml(profile.profileName)}`);
   if (profileUrl) lines.push(`🔗 <a href="${profileUrl}">Perfil na Steam</a>`);
   return lines;
@@ -80,12 +83,32 @@ async function sendWithAvatar(
 
 export async function announceJoin(ev: Extract<LogEvent, { type: "connect" }>): Promise<void> {
   const steam = describeSteamId(ev.steamId);
-  // Persiste a sessão para o histórico (/ranking), mesmo sem exibi-lo aqui.
-  await recordConnect({ name: ev.name, steamId: ev.steamId, ip: ev.ip });
+  const history = await recordConnect({ name: ev.name, steamId: ev.steamId, ip: ev.ip });
   const profile = await getSteamProfile(steam.steam64);
   const header = `🟢 <b>${escapeHtml(ev.name)}</b> entrou`;
-  const lines = [...joinLines(steam.raw, steam.profileUrl, profile), currentCountLine()];
+  const lines = [
+    ...joinLines(steam.raw, steam.profileUrl, profile),
+    ...historyLines(history),
+    currentCountLine(),
+  ];
   await sendWithAvatar(profile?.avatar ?? null, header, lines);
+}
+
+export function historyLines(history: PlayerHistory): string[] {
+  if (history === UNKNOWN_HISTORY) return [];
+  const lines: string[] = [];
+  if (history.firstTime) lines.push("Primeira vez no servidor");
+  else if (history.visits > 0) {
+    const seen = history.lastSeen ? ` · visto ${agoText(history.lastSeen)}` : "";
+    lines.push(`${history.visits + 1}ª visita${seen}`);
+    if (history.totalSeconds > 0) {
+      lines.push(`⏱️ Total: ${formatDuration(history.totalSeconds)}`);
+    }
+    if (history.previousNames.length) {
+      lines.push(`Já entrou como: ${history.previousNames.map(escapeHtml).join(", ")}`);
+    }
+  }
+  return lines;
 }
 
 export async function announceLeave(ev: {
@@ -94,9 +117,14 @@ export async function announceLeave(ev: {
   reason: string;
   seconds: number | null;
 }): Promise<void> {
+  const steam = describeSteamId(ev.steamId);
+  const countLine = currentCountLine();
+  const profile = await getSteamProfile(steam.steam64);
   const header = `🔴 <b>${escapeHtml(ev.name)}</b> saiu${ev.reason ? ` (${escapeHtml(ev.reason)})` : ""}`;
-  const lines = [`🆔 <code>${escapeHtml(ev.steamId)}</code>`];
-  if (ev.seconds !== null) lines.push(`⏱️ Ficou: ${formatDuration(ev.seconds)}`);
-  lines.push(currentCountLine());
-  sendTelegram([header, ...lines].join("\n"));
+  const lines = [
+    ...joinLines(steam.raw, steam.profileUrl, profile),
+    ...(ev.seconds !== null ? [`⏱️ Ficou: ${formatDuration(ev.seconds)}`] : []),
+    countLine,
+  ];
+  await sendWithAvatar(profile?.avatar ?? null, header, lines);
 }
