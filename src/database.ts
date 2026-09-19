@@ -64,6 +64,7 @@ export async function initializeDatabase(): Promise<void> {
       reason text
     )
   `;
+  await database`ALTER TABLE player_sessions ADD COLUMN IF NOT EXISTS country_code text`;
   await database`CREATE INDEX IF NOT EXISTS player_sessions_steam_id_idx ON player_sessions (steam_id, connected_at DESC)`;
   await database`CREATE INDEX IF NOT EXISTS player_sessions_connected_at_idx ON player_sessions (connected_at DESC)`;
   await database`CREATE INDEX IF NOT EXISTS audit_events_created_at_idx ON audit_events (created_at DESC)`;

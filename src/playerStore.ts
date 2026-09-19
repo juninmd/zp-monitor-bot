@@ -35,6 +35,7 @@ export async function recordConnect(player: {
   steamId: string;
   name: string;
   ip: string;
+  countryCode?: string | null;
 }): Promise<PlayerHistory> {
   if (!database) return UNKNOWN_HISTORY;
   try {
@@ -50,8 +51,8 @@ export async function recordConnect(player: {
        WHERE steam_id = ${player.steamId}
     `;
     await database`
-      INSERT INTO player_sessions (steam_id, name, ip)
-      VALUES (${player.steamId}, ${player.name}, ${player.ip})
+      INSERT INTO player_sessions (steam_id, name, ip, country_code)
+      VALUES (${player.steamId}, ${player.name}, ${player.ip}, ${player.countryCode ?? null})
     `;
     const row = rows[0];
     const visits = Number(row?.visits ?? 0);

@@ -28,12 +28,17 @@ export function playerConnected(p: Omit<OnlinePlayer, "isBot" | "connectedAt">):
   return isNew;
 }
 
-/** Returns how long the player stayed, in seconds (null if never seen online). */
-export function playerDisconnected(uid: string, steamId: string): number | null {
+export interface DisconnectInfo {
+  seconds: number;
+  ip: string;
+}
+
+/** Returns how long the player stayed and their IP (null if never seen online). */
+export function playerDisconnected(uid: string, steamId: string): DisconnectInfo | null {
   const key = onlineKey(uid, steamId);
   const p = online.get(key);
   online.delete(key);
-  return p ? Math.round((Date.now() - p.connectedAt) / 1000) : null;
+  return p ? { seconds: Math.round((Date.now() - p.connectedAt) / 1000), ip: p.ip } : null;
 }
 
 export function getOnline(): OnlinePlayer[] {

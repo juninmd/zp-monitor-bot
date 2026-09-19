@@ -2,6 +2,21 @@ import { config } from "./config";
 import { type LogEvent, parseLine } from "./logParser";
 
 const RECONNECT_DELAY_MS = 5000;
+const TIMESTAMP_LINE_RE = /^(\S+) (.*)$/;
+
+// Marca d'água do timestamp (RFC3339Nano, do próprio `--timestamps`) da
+// última linha processada. Sem isso, cada reconexão pedia só linhas novas a
+// partir do momento do reconnect (--tail=0/tailLines=0) - qualquer "connected
+// stream" que caísse (deploy do próprio bot, hiccup de rede, rotação do log)
+// perdia pra sempre os eventos de disconnect ocorridos durante o gap, e a
+// sessão em `player_sessions` nunca fechava.
+let lastEventAt: string | null = null;
+
+function stripTimestamp(raw: string): { at: string | null; line: string } {
+  const m = raw.match(TIMESTAMP_LINE_RE);
+  if (!m) return { at: null, line: raw };
+  return { at: m[1] ?? null, line: m[2] ?? "" };
+}
 
 async function consumeStream(
   stream: ReadableStream<Uint8Array>,
@@ -16,8 +31,16 @@ async function consumeStream(
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
-    for (const line of lines) {
-      if (!line.trim()) continue;
+    for (const raw of lines) {
+      if (!raw.trim()) continue;
+      const { at, line } = stripTimestamp(raw);
+      // --since-time é inclusivo: a linha de corte pode vir de novo na
+      // reconexão. Timestamp tem precisão de nanossegundo, então "<=" evita
+      // reprocessar sem risco real de descartar um evento distinto.
+      if (at) {
+        if (lastEventAt && at <= lastEventAt) continue;
+        lastEventAt = at;
+      }
       const event = parseLine(line);
       if (event) onEvent(event);
     }
@@ -25,6 +48,7 @@ async function consumeStream(
 }
 
 async function runKubectlOnce(onEvent: (event: LogEvent) => void): Promise<void> {
+  const since = lastEventAt ? ["--since-time", lastEventAt] : ["--tail=0"];
   const proc = Bun.spawn(
     [
       "kubectl",
@@ -36,7 +60,8 @@ async function runKubectlOnce(onEvent: (event: LogEvent) => void): Promise<void>
       "-c",
       config.container,
       "-f",
-      "--tail=0",
+      "--timestamps",
+      ...since,
     ],
     { stdout: "pipe", stderr: "pipe" },
   );
@@ -87,8 +112,9 @@ async function runKubernetesApiOnce(onEvent: (event: LogEvent) => void): Promise
   const pods = (await listResponse.json()) as PodList;
   const podName = selectLogPod(pods.items);
   if (!podName) throw new Error(`nenhum pod encontrado para ${config.podSelector}`);
+  const since = lastEventAt ? `&sinceTime=${encodeURIComponent(lastEventAt)}` : "&tailLines=0";
   const logResponse = await fetch(
-    `${base}/api/v1/namespaces/${encodeURIComponent(config.namespace)}/pods/${encodeURIComponent(podName)}/log?container=${encodeURIComponent(config.container)}&follow=true&tailLines=0`,
+    `${base}/api/v1/namespaces/${encodeURIComponent(config.namespace)}/pods/${encodeURIComponent(podName)}/log?container=${encodeURIComponent(config.container)}&follow=true&timestamps=true${since}`,
     { headers, tls },
   );
   if (!logResponse.ok || !logResponse.body) {

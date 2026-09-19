@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, mock, spyOn, test } from "bun:test";
+import * as ipGeo from "../src/ipGeo";
 import { announceJoin, announceLeave, joinLines, playerCountLine } from "../src/playerAnnounce";
 import * as playerStore from "../src/playerStore";
 import type { SteamProfile } from "../src/steamProfile";
@@ -35,15 +36,19 @@ describe("playerCountLine", () => {
 });
 
 describe("joinLines", () => {
-  test("traz SteamID, nome do perfil e link, sem dados pessoais extras", () => {
+  test("traz SteamID, IP, país, nome do perfil e link", () => {
     const lines = joinLines(
       "STEAM_0:1:0",
       "https://steamcommunity.com/profiles/1",
       profile("Nick <1>"),
+      "187.1.2.3",
+      "BR",
     );
     expect(lines).toEqual([
       "🆔 <code>STEAM_0:1:0</code>",
       "Origem: Steam",
+      "🌐 IP: <code>187.1.2.3</code>",
+      "🇧🇷 País: BR",
       "🎭 Perfil: Nick &lt;1&gt;",
       '🔗 <a href="https://steamcommunity.com/profiles/1">Perfil na Steam</a>',
     ]);
@@ -51,9 +56,10 @@ describe("joinLines", () => {
   });
 
   test("id non-Steam mostra origem ReUnion sem inventar perfil", () => {
-    const lines = joinLines("STEAM_3:0:42", null, null);
+    const lines = joinLines("STEAM_3:0:42", null, null, null, null);
     expect(lines).toContain("Origem: non-Steam (id gerado pelo ReUnion)");
     expect(lines.join("\n")).not.toContain("href");
+    expect(lines.join("\n")).not.toContain("IP");
   });
 });
 
@@ -82,6 +88,7 @@ describe("announceJoin", () => {
       previousNames: [],
     });
     getSteamProfileMock = spyOn(steamProfile, "getSteamProfile").mockResolvedValue(null);
+    spyOn(ipGeo, "getCountryByIp").mockResolvedValue(null);
     spyOn(telegram, "sendTelegram").mockImplementation((text) => {
       telegramTexts.push(text);
       return Promise.resolve();
@@ -165,6 +172,7 @@ describe("announceLeave", () => {
     telegramTexts = [];
     telegramPhotos = [];
     spyOn(steamProfile, "getSteamProfile").mockResolvedValue(null);
+    spyOn(ipGeo, "getCountryByIp").mockResolvedValue(null);
     spyOn(telegram, "sendTelegram").mockImplementation((text) => {
       telegramTexts.push(text);
       return Promise.resolve();
@@ -179,17 +187,21 @@ describe("announceLeave", () => {
     mock.restore();
   });
 
-  test("reaproveita perfil/origem e mostra duração", async () => {
+  test("reaproveita perfil/origem, mostra duração, IP e país", async () => {
+    spyOn(ipGeo, "getCountryByIp").mockResolvedValueOnce("BR");
     await announceLeave({
       name: "junin",
       steamId: "STEAM_0:1:0",
       reason: "Disconnect",
       seconds: 90,
+      ip: "187.1.2.3",
     });
     const body = telegramTexts.join("\n");
     expect(body).toContain("saiu (Disconnect)");
     expect(body).toContain("Origem: Steam");
     expect(body).toContain("Ficou: 1min 30s");
+    expect(body).toContain("🌐 IP: <code>187.1.2.3</code>");
+    expect(body).toContain("🇧🇷 País: BR");
   });
 
   test("avatar e link do perfil na saída", async () => {
@@ -202,6 +214,7 @@ describe("announceLeave", () => {
       steamId: "STEAM_0:1:0",
       reason: "Disconnect",
       seconds: 90,
+      ip: "187.1.2.3",
     });
     expect(telegramPhotos).toHaveLength(1);
     expect(telegramPhotos[0]?.caption).toContain("saiu (Disconnect)");
@@ -215,6 +228,7 @@ describe("announceLeave", () => {
       steamId: "STEAM_0:1:0",
       reason: "<kick>&",
       seconds: null,
+      ip: null,
     });
     const body = telegramTexts.join("\n");
     expect(body).toContain("saiu (&lt;kick&gt;&amp;)");
@@ -226,6 +240,7 @@ describe("announceLeave", () => {
       steamId: "STEAM_0:1:0",
       reason: "Timed out",
       seconds: null,
+      ip: null,
     });
     const body = telegramTexts.join("\n");
     expect(body).toContain("saiu (Timed out)");

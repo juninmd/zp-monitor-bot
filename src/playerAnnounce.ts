@@ -7,12 +7,13 @@
  */
 
 import { config } from "./config";
+import { getCountryByIp } from "./ipGeo";
 import type { LogEvent } from "./logParser";
 import { monitorState } from "./monitorState";
 import { type PlayerHistory, recordConnect, UNKNOWN_HISTORY } from "./playerStore";
 import { getStats } from "./state";
 import { describeSteamId, formatDuration } from "./steamId";
-import { getSteamProfile, type SteamProfile } from "./steamProfile";
+import { countryFlag, getSteamProfile, type SteamProfile } from "./steamProfile";
 import { escapeHtml, sendTelegram, sendTelegramPhotoTo } from "./telegram";
 
 const BR_TIME = new Intl.DateTimeFormat("pt-BR", {
@@ -47,11 +48,15 @@ export function joinLines(
   steamRaw: string,
   profileUrl: string | null,
   profile: SteamProfile | null,
+  ip: string | null,
+  countryCode: string | null,
 ): string[] {
   const lines = [
     `🆔 <code>${escapeHtml(steamRaw)}</code>`,
     `Origem: ${escapeHtml(describeSteamId(steamRaw).origin)}`,
   ];
+  if (ip) lines.push(`🌐 IP: <code>${escapeHtml(ip)}</code>`);
+  if (countryCode) lines.push(`${countryFlag(countryCode)} País: ${escapeHtml(countryCode)}`);
   if (profile?.profileName) lines.push(`🎭 Perfil: ${escapeHtml(profile.profileName)}`);
   if (profileUrl) lines.push(`🔗 <a href="${profileUrl}">Perfil na Steam</a>`);
   return lines;
@@ -83,11 +88,23 @@ async function sendWithAvatar(
 
 export async function announceJoin(ev: Extract<LogEvent, { type: "connect" }>): Promise<void> {
   const steam = describeSteamId(ev.steamId);
-  const history = await recordConnect({ name: ev.name, steamId: ev.steamId, ip: ev.ip });
-  const profile = await getSteamProfile(steam.steam64);
+  const [profile, ipCountry] = await Promise.all([
+    getSteamProfile(steam.steam64),
+    getCountryByIp(ev.ip),
+  ]);
+  // País da Steam vale só para contas Steam de verdade (STEAM_0/1); os
+  // clientes non-Steam do ReUnion (STEAM_2/3) não têm perfil, então o país
+  // vem do IP - que também serve de checagem cruzada para os que têm.
+  const countryCode = profile?.countryCode ?? ipCountry;
+  const history = await recordConnect({
+    name: ev.name,
+    steamId: ev.steamId,
+    ip: ev.ip,
+    countryCode,
+  });
   const header = `🟢 <b>${escapeHtml(ev.name)}</b> entrou`;
   const lines = [
-    ...joinLines(steam.raw, steam.profileUrl, profile),
+    ...joinLines(steam.raw, steam.profileUrl, profile, ev.ip, countryCode),
     ...historyLines(history),
     currentCountLine(),
   ];
@@ -116,13 +133,18 @@ export async function announceLeave(ev: {
   steamId: string;
   reason: string;
   seconds: number | null;
+  ip: string | null;
 }): Promise<void> {
   const steam = describeSteamId(ev.steamId);
   const countLine = currentCountLine();
-  const profile = await getSteamProfile(steam.steam64);
+  const [profile, ipCountry] = await Promise.all([
+    getSteamProfile(steam.steam64),
+    ev.ip ? getCountryByIp(ev.ip) : Promise.resolve(null),
+  ]);
+  const countryCode = profile?.countryCode ?? ipCountry;
   const header = `🔴 <b>${escapeHtml(ev.name)}</b> saiu${ev.reason ? ` (${escapeHtml(ev.reason)})` : ""}`;
   const lines = [
-    ...joinLines(steam.raw, steam.profileUrl, profile),
+    ...joinLines(steam.raw, steam.profileUrl, profile, ev.ip, countryCode),
     ...(ev.seconds !== null ? [`⏱️ Ficou: ${formatDuration(ev.seconds)}`] : []),
     countLine,
   ];

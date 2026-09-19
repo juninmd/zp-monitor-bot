@@ -24,14 +24,15 @@ export function handleEvent(ev: LogEvent): void {
       break;
     }
     case "disconnect": {
-      const seconds = playerDisconnected(ev.uid, ev.steamId);
+      const info = playerDisconnected(ev.uid, ev.steamId);
       if (ev.steamId !== "BOT") {
-        void recordDisconnect(ev.steamId, seconds, ev.reason);
+        void recordDisconnect(ev.steamId, info?.seconds ?? null, ev.reason);
         void announceLeave({
           name: ev.name,
           steamId: ev.steamId,
           reason: ev.reason,
-          seconds,
+          seconds: info?.seconds ?? null,
+          ip: info?.ip ?? null,
         });
       }
       break;
