@@ -40,6 +40,13 @@
       <table><thead><tr><th>Nome</th><th>Score</th><th>Tempo</th></tr></thead><tbody id="playerRows"><tr><td colspan="3" class="muted">Sem dados</td></tr></tbody></table>
     </section>
     <section class="card side"><h2>Eventos ZP</h2><ol class="events" id="events"><li class="muted">Aguardando plugin de telemetria</li></ol></section>
+    <section class="card wide">
+      <h2>Hoje</h2>
+      <table><thead><tr><th>Nome</th><th>Entrada</th><th>Duração</th></tr></thead><tbody id="todayRows"><tr><td colspan="3" class="muted">Carregando…</td></tr></tbody></table>
+      <div class="muted" style="margin-top:12px">Ranking 7 dias</div>
+      <ol id="todayRanking" class="events"><li class="muted">Carregando…</li></ol>
+      <div class="muted" style="margin-top:12px" id="todayPeak">Recorde: —</div>
+    </section>
   </main>
   <script>
     const el=id=>document.getElementById(id); let chart;
@@ -55,7 +62,15 @@
       if(!chart)chart=new Chart(el('history'),{type:'line',data,options:{animation:false,responsive:true,plugins:{legend:{labels:{color:'#8fa0b8'}}},scales:{x:{ticks:{color:'#66758c',maxTicksLimit:8}},y:{beginAtZero:true,ticks:{color:'#66758c'}}}}});else{chart.data=data;chart.update('none')}
     }
     function escapeHtml(v){const d=document.createElement('div');d.textContent=v;return d.innerHTML}
+    function renderToday(d){
+      el('todayRows').innerHTML=d.players.length?d.players.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${new Date(p.connectedAt).toLocaleTimeString('pt-BR')}</td><td>${duration(p.durationSeconds)}</td></tr>`).join(''):'<tr><td colspan="3" class="muted">Ninguém entrou hoje</td></tr>';
+      el('todayRanking').innerHTML=d.ranking.length?d.ranking.map(r=>`<li>${escapeHtml(r.name)} — ${r.kills} frags</li>`).join(''):'<li class="muted">Sem frags nos últimos 7 dias</li>';
+      el('todayPeak').textContent=d.peak?`Recorde: ${d.peak.humans} humanos em ${new Date(d.peak.at).toLocaleString('pt-BR')}`:'Recorde: sem dados';
+    }
+    function loadToday(){fetch('/api/today').then(r=>r.json()).then(renderToday).catch(()=>{})}
     fetch('/api/state').then(r=>r.json()).then(render);
+    loadToday();
+    setInterval(loadToday,60000);
     function connect(){const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);ws.onmessage=e=>{const p=JSON.parse(e.data);if(p.type==='state')render(p.data)};ws.onclose=()=>setTimeout(connect,2000)}connect();
   </script>
 </body>

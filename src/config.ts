@@ -60,4 +60,19 @@ export const config = {
   agentAmmoMaxAmount: positiveNumber("AGENT_AMMO_MAX_AMOUNT", "30"),
   agentRespawnCooldownMin: positiveNumber("AGENT_RESPAWN_COOLDOWN_MIN", "2"),
   agentMapChangeCooldownMin: positiveNumber("AGENT_MAP_CHANGE_COOLDOWN_MIN", "10"),
+
+  // Rotação automática de mapa: servidor vazio (0 humanos) por tempo demais
+  // num mapa fora da lista de populares troca sozinho, pra não ficar rodando
+  // um mapa ruim pra ninguém.
+  mapRotationEnabled: (process.env.MAP_ROTATION_ENABLED ?? "true") !== "false",
+  mapRotationEmptyMinutes: positiveNumber("MAP_ROTATION_EMPTY_MINUTES", "15"),
+  mapRotationCooldownMinutes: positiveNumber("MAP_ROTATION_COOLDOWN_MINUTES", "60"),
+  mapRotationPopularMaps: (process.env.MAP_ROTATION_POPULAR_MAPS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
+  mapRotationCandidateMaps: (process.env.MAP_ROTATION_CANDIDATE_MAPS ?? "")
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean),
 };

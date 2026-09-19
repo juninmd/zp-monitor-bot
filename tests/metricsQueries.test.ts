@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { brDayStart } from "../src/metricsQueries";
+import { brDayStart, loadTodayPlayers } from "../src/metricsQueries";
 
 describe("brDayStart", () => {
   test("corta o dia na meia-noite de São Paulo, não em UTC", () => {
@@ -16,5 +16,12 @@ describe("brDayStart", () => {
   test("o corte é sempre anterior ou igual ao instante consultado", () => {
     const now = new Date("2026-01-15T12:00:00Z");
     expect(brDayStart(now).getTime()).toBeLessThanOrEqual(now.getTime());
+  });
+});
+
+describe("loadTodayPlayers", () => {
+  test("degrada para lista vazia sem DATABASE_URL, sem lançar", async () => {
+    // Ambiente de teste não sobe Postgres: database é null (ver src/database.ts).
+    expect(await loadTodayPlayers()).toEqual([]);
   });
 });

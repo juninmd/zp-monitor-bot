@@ -4,7 +4,9 @@ import { config } from "./config";
 import { databaseHealth, initializeDatabase } from "./database";
 import { ingestKnowledgeDirectory, knowledgeStats } from "./knowledgeStore";
 import { startLogTail } from "./logTail";
+import { checkMapRotation } from "./mapRotation";
 import { hydrateMetrics } from "./metrics";
+import { loadPeakRecord, loadRanking, loadTodayPlayers } from "./metricsQueries";
 import { flushKills, initializeMetricsTables } from "./metricsStore";
 import { monitorState, startMonitor } from "./monitorState";
 import { handleEvent, handleMonitorEvents } from "./notifier";
@@ -42,6 +44,14 @@ const app = new Elysia()
   })
   .get("/stats", () => getStats())
   .get("/api/state", () => monitorState)
+  .get("/api/today", async () => {
+    const [players, ranking, peak] = await Promise.all([
+      loadTodayPlayers(),
+      loadRanking(7, 5),
+      loadPeakRecord(),
+    ]);
+    return { players, ranking, peak };
+  })
   .post("/api/telegram", async ({ body, request, set }) => {
     if (!authorized(request)) {
       set.status = 401;
@@ -103,6 +113,8 @@ async function bootstrap(): Promise<void> {
   if (config.telegramPollingEnabled) void startTelegramBot();
   // Transições detectadas pelo polling (mapa trocou, servidor caiu/voltou).
   setInterval(() => handleMonitorEvents(), 2000);
+  // Rotação automática de mapa vazio: checagem a cada 60s basta (limiar é em minutos).
+  setInterval(() => void checkMapRotation(), 60_000);
 }
 
 // Kills ficam até 10s em buffer: descarrega antes do pod morrer. Marcar

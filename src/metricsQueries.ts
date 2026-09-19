@@ -127,6 +127,45 @@ export async function loadRanking(days: number, limit = 10): Promise<RankingEntr
   }
 }
 
+export interface TodayPlayer {
+  steamId: string;
+  name: string;
+  connectedAt: Date;
+  disconnectedAt: Date | null;
+  durationSeconds: number | null;
+}
+
+/** Sessões de jogadores reais de hoje (dia BR), para o painel "Hoje" do dashboard. */
+export async function loadTodayPlayers(): Promise<TodayPlayer[]> {
+  if (!database) return [];
+  try {
+    const rows = await database<
+      Array<{
+        steam_id: string;
+        name: string;
+        connected_at: Date;
+        disconnected_at: Date | null;
+        duration_seconds: number | string | null;
+      }>
+    >`
+      SELECT steam_id, name, connected_at, disconnected_at, duration_seconds
+        FROM player_sessions
+       WHERE connected_at >= ${brDayStart()}
+       ORDER BY connected_at ASC
+    `;
+    return rows.map((r) => ({
+      steamId: r.steam_id,
+      name: r.name,
+      connectedAt: r.connected_at,
+      disconnectedAt: r.disconnected_at,
+      durationSeconds: r.duration_seconds == null ? null : int(r.duration_seconds),
+    }));
+  } catch (error) {
+    console.error("[metricsQueries] loadTodayPlayers falhou", error);
+    return [];
+  }
+}
+
 /** Recorde histórico de humanos simultâneos e quando aconteceu. */
 export async function loadPeakRecord(): Promise<{ humans: number; at: Date } | null> {
   if (!database) return null;
