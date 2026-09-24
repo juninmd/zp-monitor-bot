@@ -38,14 +38,11 @@ export const config = {
 
   agentEnabled: (process.env.AGENT_ENABLED ?? "true") !== "false",
   // LLM served by our own LiteLLM proxy (OpenAI-compatible /v1/chat/completions),
-  // not a personal API key. Tries models in order and sticks with the first
-  // that works: NVIDIA (NIM) first, then Ollama Cloud, Gemini/Gemma only last.
+  // not a personal API key. cloud/auto: provider choice and fallbacks live in LiteLLM.
   litellmApiKey: process.env.LITELLM_API_KEY ?? "",
   litellmBaseUrl: process.env.LITELLM_BASE_URL ?? "http://litellm.ai.svc.cluster.local:4000/v1",
   embeddingModel: process.env.EMBEDDING_MODEL ?? "nomic-embed-text",
-  agentModels: (
-    process.env.AGENT_MODELS ?? "cloud/nemotron-super-49b,cloud/ollama-nemotron-ultra,cloud/gemma3"
-  )
+  agentModels: (process.env.AGENT_MODELS ?? "cloud/auto")
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
