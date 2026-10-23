@@ -1,29 +1,14 @@
-name: Container
+name: Build and Push Docker Image
 
 on:
   push:
     branches: [main]
   workflow_dispatch:
 
-permissions:
-  contents: read
-  packages: write
-
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: docker/login-action@v4
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/setup-buildx-action@v4
-      - uses: docker/build-push-action@v7
-        with:
-          context: .
-          push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:latest
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
+  docker:
+    uses: juninmd/base-actions/.github/workflows/reusable-docker-build.yml@main
+    with:
+      image-name: ${{ github.repository }}
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
