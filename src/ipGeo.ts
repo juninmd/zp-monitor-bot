@@ -1,3 +1,5 @@
+import { pruneExpired } from "./cachePrune";
+
 const TTL_MS = 24 * 60 * 60 * 1000;
 const cache = new Map<string, { at: number; countryCode: string | null }>();
 
@@ -29,6 +31,7 @@ export async function getCountryByIp(ip: string): Promise<string | null> {
     if (!response.ok) throw new Error(`ip-api HTTP ${response.status}`);
     const data = (await response.json()) as { status?: string; countryCode?: string };
     const countryCode = data.status === "success" && data.countryCode ? data.countryCode : null;
+    pruneExpired(cache, TTL_MS);
     cache.set(host, { at: Date.now(), countryCode });
     return countryCode;
   } catch (error) {
