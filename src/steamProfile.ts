@@ -1,5 +1,5 @@
-import { config } from "./config";
 import { pruneExpired } from "./cachePrune";
+import { config } from "./config";
 
 export interface SteamProfile {
   steam64: string;
