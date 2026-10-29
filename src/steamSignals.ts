@@ -7,6 +7,7 @@
  * chave, ou com perfil privado, tudo degrada para null e a notificação segue.
  */
 
+import { pruneExpired } from "./cachePrune";
 import { config } from "./config";
 
 /** appids de Counter-Strike que contam como "horas de CS". */
@@ -89,6 +90,7 @@ export async function getSteamSignals(steam64: string | null): Promise<SteamSign
       loadCsHours(steam64).catch(() => ({ hours: [], visible: false })),
     ]);
     if (!bans && !games.visible) {
+      pruneExpired(cache, TTL_MS);
       cache.set(steam64, { at: Date.now(), signals: null });
       return null;
     }
@@ -106,6 +108,7 @@ export async function getSteamSignals(steam64: string | null): Promise<SteamSign
       csHours: games.hours,
       ownsNoCs: games.visible && games.hours.length === 0,
     };
+    pruneExpired(cache, TTL_MS);
     cache.set(steam64, { at: Date.now(), signals });
     return signals;
   } catch (error) {

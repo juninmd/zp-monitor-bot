@@ -1,3 +1,4 @@
+import { pruneExpired } from "./cachePrune";
 import { config } from "./config";
 
 export interface SteamProfile {
@@ -141,6 +142,7 @@ export async function getSteamProfile(steam64: string | null): Promise<SteamProf
   if (cached && Date.now() - cached.at < PROFILE_TTL_MS) return cached.profile;
   try {
     const profile = await loadProfile(steam64);
+    pruneExpired(cache, PROFILE_TTL_MS);
     cache.set(steam64, { at: Date.now(), profile });
     return profile;
   } catch (error) {
