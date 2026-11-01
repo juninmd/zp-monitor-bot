@@ -40,3 +40,9 @@ describe("parseTelegramCommand", () => {
     expect(parseTelegramCommand("/map")).toEqual({ kind: "unknown" });
   });
 });
+
+test("comandos de mapa de calor e gráfico", () => {
+  expect(parseTelegramCommand("/calor")).toEqual({ kind: "heatmap" });
+  expect(parseTelegramCommand("/heatmap")).toEqual({ kind: "heatmap" });
+  expect(parseTelegramCommand("/grafico")).toEqual({ kind: "chart" });
+});

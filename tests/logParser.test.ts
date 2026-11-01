@@ -12,6 +12,7 @@ describe("parseLine", () => {
       killer: { name: "Menor", uid: "7", steamId: "STEAM_0:0:12345", team: "CT" },
       victim: { name: "zumbi_pedro", uid: "8", steamId: "STEAM_0:0:67890", team: "TERRORIST" },
       weapon: "knife",
+      victimPos: { x: 100, y: 200 },
     });
   });
 
@@ -24,6 +25,7 @@ describe("parseLine", () => {
       killer: { name: "Bot01", uid: "1", steamId: "BOT", team: "TERRORIST" },
       victim: { name: "Jogador", uid: "9", steamId: "STEAM_0:1:999", team: "CT" },
       weapon: "weapon_ak47",
+      victimPos: { x: 4, y: 5 },
     });
   });
 

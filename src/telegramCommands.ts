@@ -6,6 +6,8 @@ export type TelegramCommand =
   | { kind: "ranking" }
   | { kind: "radar" }
   | { kind: "map" }
+  | { kind: "heatmap" }
+  | { kind: "chart" }
   | { kind: "audit" }
   | { kind: "help" }
   | { kind: "unknown" };
@@ -23,6 +25,8 @@ export function parseTelegramCommand(text: string): TelegramCommand {
   if (normalized === "/mapa" || normalized === "/print" || normalized === "/screenshot") {
     return { kind: "map" };
   }
+  if (normalized === "/calor" || normalized === "/heatmap") return { kind: "heatmap" };
+  if (normalized === "/grafico" || normalized === "/chart") return { kind: "chart" };
   if (normalized === "/audit") return { kind: "audit" };
 
   const rcon = input.match(/^\/rcon\s+(status|stats|users|zp_telemetry_snapshot)$/i);
