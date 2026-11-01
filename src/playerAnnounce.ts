@@ -9,7 +9,7 @@
 import { config } from "./config";
 import { getCountryByIp } from "./ipGeo";
 import type { LogEvent } from "./logParser";
-import { monitorState } from "./monitorState";
+import { getPlayerCounts, monitorState } from "./monitorState";
 import { type PlayerHistory, recordConnect, UNKNOWN_HISTORY } from "./playerStore";
 import { getStats } from "./state";
 import { describeSteamId, formatDuration } from "./steamId";
@@ -27,8 +27,10 @@ export function agoText(date: Date): string {
   return `${BR_TIME.format(date)} (há ${formatDuration(seconds)})`;
 }
 
-// Contagem vem do log (state.ts), atualizada no próprio evento; o A2S só
-// refletiria a entrada/saída no próximo polling.
+// Contagem vem do A2S + tabela `status` (monitorState), que separa humano de
+// bot de verdade; o log (state.ts) só entra como fallback com o servidor fora
+// do ar, porque o contador dele acumula bots fantasmas a cada troca de mapa.
+// Custo: reflete a entrada/saída só no próximo polling.
 export function playerCountLine(
   stats: { humans: number; bots: number },
   map: string | null,
@@ -41,7 +43,11 @@ export function playerCountLine(
 
 function currentCountLine(): string {
   const info = monitorState.info;
-  return playerCountLine(getStats(), info?.map ?? null, info?.maxplayers ?? null);
+  return playerCountLine(
+    getPlayerCounts() ?? getStats(),
+    info?.map ?? null,
+    info?.maxplayers ?? null,
+  );
 }
 
 export function joinLines(

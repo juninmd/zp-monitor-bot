@@ -4,7 +4,7 @@ import type { LogEvent } from "./logParser";
 import { renderMapImage } from "./mapImage";
 import { recordHumanChat, recordHumanSeen, recordKill } from "./metrics";
 import { loadPeakRecord, loadRanking } from "./metricsQueries";
-import { consumeMonitorEvents } from "./monitorState";
+import { consumeMonitorEvents, getPlayerCounts, monitorState } from "./monitorState";
 import { agoText, announceJoin, announceLeave } from "./playerAnnounce";
 import { recordDisconnect } from "./playerStore";
 import { runRconCommand } from "./rcon";
@@ -57,6 +57,24 @@ export function handleEvent(ev: LogEvent): void {
   }
 }
 
+/** No ZP o time T é o zumbi e o CT é o humano; spectator/unassigned não ganha ícone. */
+export function teamIcon(team: string): string {
+  if (team === "TERRORIST") return "🧟 ";
+  if (team === "CT") return "🧍 ";
+  return "";
+}
+
+/** Mapa e contagem de gente de verdade no momento da fala. */
+export function chatContext(): string {
+  const counts = getPlayerCounts();
+  const map = monitorState.info?.map;
+  const parts = [
+    ...(counts ? [`👥 ${counts.humans} real(is) + ${counts.bots} bot(s)`] : []),
+    ...(map ? [`🗺️ ${escapeHtml(map)}`] : []),
+  ];
+  return parts.join(" · ") || "—";
+}
+
 /**
  * Repassa o chat do jogo. Falas de bot são descartadas por padrão
  * (CHAT_RELAY_BOTS=false): elas não são interações de jogadores reais, e com
@@ -68,8 +86,11 @@ function relayChat(ev: Extract<LogEvent, { type: "say" }>): void {
   if (!isBot) recordHumanChat();
 
   const scope = ev.teamOnly ? "(time) " : "";
-  const who = isBot ? `🤖 ${escapeHtml(ev.name)}` : `<b>${escapeHtml(ev.name)}</b>`;
-  sendTelegram(`💬 ${scope}${who}: ${escapeHtml(ev.message)}`);
+  const who = isBot
+    ? `🤖 ${escapeHtml(ev.name)}`
+    : `${teamIcon(ev.team)}<b>${escapeHtml(ev.name)}</b>`;
+  const context = isBot ? "" : `\n<i>${chatContext()}</i>`;
+  sendTelegram(`💬 ${scope}${who}: ${escapeHtml(ev.message)}${context}`);
 
   if (!isBot && config.agentTriggerRegex.test(ev.message)) {
     void handleAgentReply(ev);
@@ -103,9 +124,11 @@ export function handleMonitorEvents(): void {
 }
 
 async function announceMapChange(transition: string, map: string): Promise<void> {
-  const caption = `🗺️ Mapa trocou: ${escapeHtml(transition)}`;
+  const counts = getPlayerCounts();
+  const people = counts ? `\n👥 ${counts.humans} real(is) + ${counts.bots} bot(s)` : "";
+  const caption = `🗺️ Mapa trocou: ${escapeHtml(transition)}${people}`;
   try {
-    const png = await renderMapImage(map, []);
+    const png = await renderMapImage(map, [], counts);
     if (png) {
       await sendTelegramPhoto(png, caption);
       return;

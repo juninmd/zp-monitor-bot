@@ -10,7 +10,10 @@ const GRID_COLOR = "#22262f";
 
 // No per-map calibration data available; auto-scale to the current frame's
 // bounding box (with padding) instead of hardcoding map coordinate ranges.
-export function renderRadar(players: RadarPlayer[]): Buffer | null {
+export function renderRadar(
+  players: RadarPlayer[],
+  counts?: { humans: number; bots: number } | null,
+): Buffer | null {
   if (players.length === 0) return null;
 
   const xs = players.map((p) => p.x);
@@ -110,6 +113,11 @@ export function renderRadar(players: RadarPlayer[]): Buffer | null {
 
   ctx.fillStyle = "#8a8f9c";
   ctx.fillText(`zumbis: ${zombieCount}  humanos: ${humanCount}`, 10, SIZE - 12);
+
+  if (counts) {
+    ctx.fillStyle = "#c7cbd4";
+    ctx.fillText(`reais: ${counts.humans}  bots: ${counts.bots}`, 10, SIZE - 30);
+  }
 
   return canvas.toBuffer("image/png");
 }
