@@ -134,6 +134,8 @@ export interface MonitorEvent {
   message: string;
   /** Mapa novo, só em map_change. */
   map?: string;
+  /** Mapa que acabou, só em map_change. */
+  from?: string;
   t: number;
 }
 
@@ -249,6 +251,7 @@ async function pollA2s(options: MonitorOptions, broadcast: () => void): Promise<
         kind: "map_change",
         message: `${lastMap} → ${result.map}`,
         map: result.map,
+        from: lastMap,
         t: Date.now(),
       });
     }

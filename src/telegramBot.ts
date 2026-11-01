@@ -1,6 +1,8 @@
 import { answerZombieQuestion } from "./agent/agent";
+import { renderHistoryChart } from "./chart";
 import { config } from "./config";
 import { auditEvent, recentAudit } from "./database";
+import { deathSpots } from "./killFeed";
 import { retrieveKnowledge } from "./knowledgeStore";
 import { renderMapImage } from "./mapImage";
 import { getMetrics } from "./metrics";
@@ -32,6 +34,8 @@ const HELP = `Comandos:
 /ranking — ranking de 7 dias e recorde de pico
 /radar — posição e direção dos jogadores
 /mapa — print do mapa atual
+/calor — mapa de calor das mortes do mapa atual
+/grafico — jogadores reais, zumbis e humanos ao longo do tempo
 /ask <pergunta> — dúvidas sobre Zombie Plague
 /rcon status|stats|users|zp_telemetry_snapshot — console remoto auditado
 /map <nome> — troca de mapa auditada
@@ -155,6 +159,33 @@ export async function handleTelegramText(
     } catch (error) {
       return `❌ Print indisponível: ${error instanceof Error ? error.message : String(error)}`;
     }
+  }
+  if (parsed.kind === "heatmap") {
+    try {
+      const map = monitorState.info?.map ?? "";
+      const spots = map ? deathSpots(map) : [];
+      if (!spots.length) return "Sem mortes registradas neste mapa ainda.";
+      const png = await renderMapImage(map, [], getPlayerCounts(), spots);
+      if (!png) return "Mapa de calor indisponível (overview não acessível via kubectl).";
+      await sendTelegramPhotoTo(
+        chatId,
+        png,
+        `🔥 Mortes em ${map}: ${spots.length} (mais claro = mais combate)`,
+      );
+      return null;
+    } catch (error) {
+      return `❌ Mapa de calor indisponível: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+  if (parsed.kind === "chart") {
+    const png = renderHistoryChart(monitorState.history, "Jogadores ao longo do tempo");
+    if (!png) return "Ainda não há leituras suficientes para o gráfico.";
+    await sendTelegramPhotoTo(
+      chatId,
+      png,
+      "📈 Reais x zumbis x humanos (zumbis e humanos incluem bots)",
+    );
+    return null;
   }
   if (parsed.kind === "audit") {
     const rows = await recentAudit();

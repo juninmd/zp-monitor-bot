@@ -203,6 +203,32 @@ function drawRealCounts(ctx: SKRSContext2D, width: number, counts: RealCounts): 
   ctx.fillText(text, pad * 2, top + boxHeight / 2);
 }
 
+/**
+ * Mancha de calor dos pontos de morte: gradientes radiais translúcidos que
+ * somam onde se sobrepõem, então os pontos de combate ficam mais quentes.
+ */
+function drawHeat(
+  ctx: SKRSContext2D,
+  overview: Overview,
+  heat: Array<{ x: number; y: number }>,
+  width: number,
+  height: number,
+): void {
+  const radius = Math.max(14, Math.round(Math.min(width, height) / 24));
+  ctx.save();
+  ctx.globalCompositeOperation = "lighter";
+  for (const spot of heat) {
+    const at = projectToPixels(overview, spot.x, spot.y, width, height);
+    if (!at) continue;
+    const gradient = ctx.createRadialGradient(at[0], at[1], 0, at[0], at[1], radius);
+    gradient.addColorStop(0, "rgba(255,120,0,0.28)");
+    gradient.addColorStop(1, "rgba(255,120,0,0)");
+    ctx.fillStyle = gradient;
+    ctx.fillRect(at[0] - radius, at[1] - radius, radius * 2, radius * 2);
+  }
+  ctx.restore();
+}
+
 /** Nome do mapa no canto inferior direito, para o print não depender do caption. */
 function drawMapLabel(ctx: SKRSContext2D, width: number, height: number, map: string): void {
   const pad = Math.max(6, Math.round(width / 80));
@@ -231,6 +257,7 @@ export async function renderMapImage(
   map: string,
   players: RadarPlayer[],
   counts?: RealCounts | null,
+  heat?: Array<{ x: number; y: number }>,
 ): Promise<Buffer | null> {
   if (!map) return null;
   const { overview, image } = await loadAssets(map);
@@ -242,6 +269,8 @@ export async function renderMapImage(
   base.data.set(image.rgba);
   maskChromaKey(base.data);
   ctx.putImageData(base, 0, 0);
+
+  if (heat?.length) drawHeat(ctx, overview, heat, image.width, image.height);
 
   if (players.length > 0) {
     const r = Math.max(5, Math.round(Math.min(image.width, image.height) / 90));

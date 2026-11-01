@@ -159,3 +159,16 @@ describe("renderMapImage", () => {
     expect(fetched).toHaveLength(3);
   });
 });
+
+describe("renderMapImage heatmap", () => {
+  test("desenha o calor das mortes sem quebrar e muda o PNG", async () => {
+    clearMapAssetCache();
+    const plain = await renderMapImage("zm_test", []);
+    const hot = await renderMapImage("zm_test", [], null, [
+      { x: 0, y: 0 },
+      { x: 100, y: 100 },
+    ]);
+    expect(hot).not.toBeNull();
+    expect(hot?.equals(plain as Buffer)).toBe(false);
+  });
+});

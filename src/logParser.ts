@@ -17,6 +17,8 @@ export type LogEvent =
       killer: { name: string; uid: string; steamId: string; team: string };
       victim: { name: string; uid: string; steamId: string; team: string };
       weapon: string;
+      /** Posição de mundo da vítima na hora da morte (alimenta o heatmap). */
+      victimPos: { x: number; y: number };
     };
 
 const CONNECT_RE = /"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><>" connected, address "([^"]*)"/;
@@ -27,7 +29,7 @@ const DISCONNECT_RE =
 const SAY_RE = /"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" (say|say_team) "(.*)"/;
 // "Fulano<7><STEAM_0:0:123><CT>" [-258 1340 18] killed "Cicrano<8><STEAM_0:0:456><T>" [100 200 30] with "knife"
 const KILL_RE =
-  /^"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*-?\d+\s+-?\d+\s+-?\d+\s*\] killed "(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*-?\d+\s+-?\d+\s+-?\d+\s*\] with "([^"]*)"/;
+  /^"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*-?\d+\s+-?\d+\s+-?\d+\s*\] killed "(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*(-?\d+)\s+(-?\d+)\s+-?\d+\s*\] with "([^"]*)"/;
 
 export function parseLine(line: string): LogEvent | null {
   let m = line.match(CONNECT_RE);
@@ -98,7 +100,8 @@ export function parseLine(line: string): LogEvent | null {
         steamId: m[7] ?? "",
         team: m[8] ?? "",
       },
-      weapon: m[9] ?? "",
+      weapon: m[11] ?? "",
+      victimPos: { x: Number(m[9]), y: Number(m[10]) },
     };
 
   return null;

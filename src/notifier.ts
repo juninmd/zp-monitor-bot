@@ -1,5 +1,6 @@
 import { handlePlayerMessage, sanitizeChatReply } from "./agent/agent";
 import { config } from "./config";
+import { recordMapKill, summarizeMap } from "./killFeed";
 import type { LogEvent } from "./logParser";
 import { renderMapImage } from "./mapImage";
 import { recordHumanChat, recordHumanSeen, recordKill } from "./metrics";
@@ -48,6 +49,15 @@ export function handleEvent(ev: LogEvent): void {
         victimName: ev.victim.name,
         victimSteamId: ev.victim.steamId,
         weapon: ev.weapon,
+      });
+      recordMapKill({
+        map: monitorState.info?.map ?? "",
+        killerName: ev.killer.name,
+        killerSteamId: ev.killer.steamId,
+        victimSteamId: ev.victim.steamId,
+        weapon: ev.weapon,
+        x: ev.victimPos.x,
+        y: ev.victimPos.y,
       });
       break;
     }
@@ -119,14 +129,37 @@ async function handleAgentReply(ev: Extract<LogEvent, { type: "say" }>): Promise
 /** Consome as transições do polling; só a troca de mapa vira aviso, com o print. */
 export function handleMonitorEvents(): void {
   for (const event of consumeMonitorEvents()) {
-    if (event.kind === "map_change") void announceMapChange(event.message, event.map ?? "");
+    if (event.kind === "map_change") {
+      void announceMapChange(event.message, event.map ?? "", event.from ?? "");
+    }
   }
 }
 
-async function announceMapChange(transition: string, map: string): Promise<void> {
+/** Fecha o mapa que acabou: kills, MVPs e arma mais usada por jogadores reais. */
+export function recapText(from: string): string {
+  const summary = from ? summarizeMap(from, true) : null;
+  if (!summary) return "";
+  const lines = [`🏁 Resumo de <b>${escapeHtml(summary.map)}</b>: ${summary.kills} kills`];
+  if (summary.topFraggers.length) {
+    const medals = ["🥇", "🥈", "🥉"];
+    lines.push(
+      summary.topFraggers
+        .map((p, i) => `${medals[i]} ${escapeHtml(p.name)} (${p.kills})`)
+        .join(" · "),
+    );
+  }
+  if (summary.topWeapon) {
+    lines.push(
+      `🔪 Arma do mapa: ${escapeHtml(summary.topWeapon.weapon)} ×${summary.topWeapon.kills}`,
+    );
+  }
+  return `\n${lines.join("\n")}`;
+}
+
+async function announceMapChange(transition: string, map: string, from: string): Promise<void> {
   const counts = getPlayerCounts();
   const people = counts ? `\n👥 ${counts.humans} real(is) + ${counts.bots} bot(s)` : "";
-  const caption = `🗺️ Mapa trocou: ${escapeHtml(transition)}${people}`;
+  const caption = `🗺️ Mapa trocou: ${escapeHtml(transition)}${people}${recapText(from)}`;
   try {
     const png = await renderMapImage(map, [], counts);
     if (png) {

@@ -32,6 +32,10 @@ Google ADK via LiteLLM, RAG com pgvector e integração Telegram com auditoria.
 - `/radar`: posição e direção dos jogadores.
 - `/mapa` ou `/print`: print do mapa atual (overview do servidor com posições
   sobrepostas quando a calibração existe; degrada para o radar).
+- `/calor` ou `/heatmap`: mapa de calor das mortes do mapa atual (posições
+  vindas do log, zeradas a cada troca de mapa).
+- `/grafico` ou `/chart`: gráfico de jogadores reais, zumbis e humanos nas
+  últimas leituras.
 - `/ask <pergunta>` ou texto livre: resposta ADK com contexto recuperado do
   pgvector.
 - `/ask registre na memória que <fato>`: grava o fato via tool e o deixa
@@ -56,7 +60,9 @@ O canal recebe apenas:
 - Entrada e saída trazem a quantidade de jogadores (reais + bots) e o mapa.
 - Chat do jogo (e respostas da IA) só de jogadores reais por padrão
   (`CHAT_RELAY_BOTS=false` descarta falas de bots).
-- Troca de mapa com o print do overview (texto se o overview não existir).
+- Troca de mapa com o print do overview (texto se o overview não existir) e o
+  resumo do mapa que acabou: kills, top 3 fraggers reais e arma mais usada.
+- Chat de jogadores reais com time (🧟/🧍), reais + bots e mapa no momento.
 
 Queda/volta do servidor e ações da IA (respawn, AP, troca de mapa) vão só
 para o log. Kills e pico de humanos seguem alimentando as métricas.
