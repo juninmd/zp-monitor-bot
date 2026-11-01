@@ -4,10 +4,11 @@ import { auditEvent, recentAudit } from "./database";
 import { retrieveKnowledge } from "./knowledgeStore";
 import { renderMapImage } from "./mapImage";
 import { getMetrics } from "./metrics";
-import { monitorState } from "./monitorState";
+import { getPlayerCounts, monitorState } from "./monitorState";
 import { historyText } from "./notifier";
 import { renderRadar } from "./radar";
 import { getPositions, runRconCommand } from "./rcon";
+import { formatDuration } from "./steamId";
 import { sendTelegramPhotoTo, sendTelegramTo } from "./telegram";
 import { parseTelegramCommand } from "./telegramCommands";
 
@@ -41,24 +42,42 @@ function actorName(update: TelegramUpdate): string {
   return from?.username ? `@${from.username}` : (from?.first_name ?? String(from?.id ?? "unknown"));
 }
 
-function statusText(): string {
+function playerLine(player: (typeof monitorState.players)[number]): string {
+  const ping = typeof player.ping === "number" ? ` · ${player.ping} ms` : "";
+  const time = player.time !== null ? ` · ${formatDuration(Math.round(player.time))}` : "";
+  return `• ${player.name} — ${player.score} frags${time}${ping}`;
+}
+
+export function statusText(): string {
   const info = monitorState.info;
   const telemetry = monitorState.telemetry;
+  const round = telemetry.round;
   return [
     monitorState.connection.online ? "🟢 Servidor online" : "🔴 Servidor offline",
     info
-      ? `Mapa: ${info.map} | Jogadores reais: ${info.players}/${info.maxplayers} (+${info.bots} bots) | Ping: ${info.ping ?? "—"} ms`
+      ? `🗺️ Mapa: ${info.map} | 👥 Jogadores reais: ${info.players}/${info.maxplayers} (+${info.bots} bots) | Ping: ${info.ping ?? "—"} ms`
+      : null,
+    info && monitorState.playersSource === "heuristic"
+      ? "⚠️ Separação humano/bot estimada (RCON status indisponível)"
       : null,
     monitorState.rcon.fps !== null ? `⚡ FPS do servidor: ${monitorState.rcon.fps}` : null,
     telemetry.connected
-      ? `Modo: ${telemetry.round?.mode ?? "—"} | 🧟 ${telemetry.zombies} x 🧍 ${telemetry.humans}`
+      ? `🎮 Modo: ${round?.mode ?? "—"} (${round?.phase ?? "—"}, ${round?.elapsed ?? 0}s) | 🧟 ${telemetry.zombies} x 🧍 ${telemetry.humans} (inclui bots)`
       : "Telemetria ZP indisponível",
     monitorState.players.length
-      ? `Online: ${monitorState.players.map((player) => player.name).join(", ")}`
+      ? `Online agora:\n${monitorState.players.map(playerLine).join("\n")}`
       : "Sem jogadores humanos listados.",
   ]
     .filter(Boolean)
     .join("\n");
+}
+
+/** Linha de legenda: pessoas de verdade x bots (as posições do mapa incluem bots). */
+function countsCaption(): string {
+  const counts = getPlayerCounts();
+  return counts
+    ? `👥 ${counts.humans} real(is) + ${counts.bots} bot(s) — marcadores incluem bots`
+    : "👥 contagem de jogadores indisponível";
 }
 
 function statsText(): string {
@@ -103,12 +122,12 @@ export async function handleTelegramText(
   if (parsed.kind === "radar") {
     try {
       const players = await getPositions();
-      const png = players.length > 0 ? renderRadar(players) : null;
+      const png = players.length > 0 ? renderRadar(players, getPlayerCounts()) : null;
       if (png) {
         await sendTelegramPhotoTo(
           chatId,
           png,
-          "🗺️ Radar (posição + direção)\n🔴▲ zumbi  🔵● humano",
+          `🗺️ Radar (posição + direção)\n🔴▲ zumbi  🔵● humano\n${countsCaption()}`,
         );
         return null;
       }
@@ -121,9 +140,13 @@ export async function handleTelegramText(
     try {
       const map = monitorState.info?.map ?? "";
       const players = await getPositions();
-      const png = map ? await renderMapImage(map, players) : null;
+      const png = map ? await renderMapImage(map, players, getPlayerCounts()) : null;
       if (png) {
-        await sendTelegramPhotoTo(chatId, png, `🗺️ Print do mapa: ${map}\n🔴▲ zumbi  🔵● humano`);
+        await sendTelegramPhotoTo(
+          chatId,
+          png,
+          `🗺️ Print do mapa: ${map}\n🔴▲ zumbi  🔵● humano\n${countsCaption()}`,
+        );
         return null;
       }
       return map

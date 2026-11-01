@@ -178,6 +178,31 @@ function drawScoreboard(ctx: SKRSContext2D, width: number, players: RadarPlayer[
   ctx.fillText(hText, x, midY);
 }
 
+export interface RealCounts {
+  humans: number;
+  bots: number;
+}
+
+/**
+ * As posições do telemetry incluem os bots, então o placar ▲ x ● mostra times,
+ * não gente. Esta caixa abaixo dele diz quantos clientes são pessoas de verdade.
+ */
+function drawRealCounts(ctx: SKRSContext2D, width: number, counts: RealCounts): void {
+  const pad = Math.max(6, Math.round(width / 80));
+  const size = Math.max(12, Math.round(width / 40));
+  const top = pad + Math.max(12, Math.round(width / 32)) + pad * 2 + pad;
+  ctx.font = `bold ${size}px sans-serif`;
+  ctx.textBaseline = "middle";
+  ctx.textAlign = "left";
+  const text = `${counts.humans} reais · ${counts.bots} bots`;
+  const boxWidth = ctx.measureText(text).width + pad * 2;
+  const boxHeight = size + pad;
+  ctx.fillStyle = "rgba(0,0,0,0.55)";
+  ctx.fillRect(pad, top, boxWidth, boxHeight);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillText(text, pad * 2, top + boxHeight / 2);
+}
+
 /** Nome do mapa no canto inferior direito, para o print não depender do caption. */
 function drawMapLabel(ctx: SKRSContext2D, width: number, height: number, map: string): void {
   const pad = Math.max(6, Math.round(width / 80));
@@ -202,7 +227,11 @@ function drawMapLabel(ctx: SKRSContext2D, width: number, height: number, map: st
  * mandar a imagem crua com a legenda "🔴▲ zumbi 🔵● humano" seria mentira -
  * o caller cai no radar, que ao menos mostra as posições de verdade.
  */
-export async function renderMapImage(map: string, players: RadarPlayer[]): Promise<Buffer | null> {
+export async function renderMapImage(
+  map: string,
+  players: RadarPlayer[],
+  counts?: RealCounts | null,
+): Promise<Buffer | null> {
   if (!map) return null;
   const { overview, image } = await loadAssets(map);
   if (!image || !overview) return null;
@@ -222,6 +251,7 @@ export async function renderMapImage(map: string, players: RadarPlayer[]): Promi
     }
     drawScoreboard(ctx, image.width, players);
   }
+  if (counts) drawRealCounts(ctx, image.width, counts);
   drawMapLabel(ctx, image.width, image.height, map);
   return canvas.toBuffer("image/png");
 }

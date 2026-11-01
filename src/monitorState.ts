@@ -7,11 +7,31 @@ interface MonitorPlayer {
   name: string;
   score: number;
   time: number | null;
+  /** Ping em ms, só quando a tabela `status` do RCON está disponível. */
+  ping?: number | null;
 }
 
 // A `status` table older than this is ignored: bots churn with the quota, and
 // a stale table would label a fresh human as a bot (or the reverse).
 const STATUS_MAX_AGE_MS = 30_000;
+
+export interface PlayerCounts {
+  humans: number;
+  bots: number;
+  /** "status" = tabela RCON (confiável); "heuristic" = palpite do GameDig. */
+  source: "status" | "heuristic";
+}
+
+/**
+ * Fonte única da contagem de jogadores reais x bots. O log (state.ts) não serve:
+ * o servidor não loga a saída dos bots na troca de mapa, então o contador
+ * acumula bots fantasmas e perde quem já estava online antes do boot do bot.
+ */
+export function getPlayerCounts(): PlayerCounts | null {
+  const info = monitorState.info;
+  if (!info || !monitorState.connection.online) return null;
+  return { humans: info.players, bots: info.bots, source: monitorState.playersSource };
+}
 
 interface MonitorState {
   connection: { online: boolean; lastError: string | null; lastUpdate: number | null };
@@ -165,14 +185,28 @@ function toMonitorPlayer(player: QueryResult["players"][number]): MonitorPlayer 
  */
 function resolvePlayers(result: QueryResult): {
   players: MonitorPlayer[];
+  bots: number;
   source: MonitorState["playersSource"];
 } {
   const listed = [...result.players, ...result.bots].map(toMonitorPlayer);
   const fresh =
     lastStatus && Date.now() - lastStatus.at <= STATUS_MAX_AGE_MS ? lastStatus.clients : [];
   const split = splitByStatus(listed, fresh);
-  if (split) return { players: split.humans, source: "status" };
-  return { players: result.players.map(toMonitorPlayer), source: "heuristic" };
+  if (split) {
+    // Consome um cliente da tabela por jogador para nicks repetidos.
+    const pool = fresh.filter((client) => !client.isBot);
+    const players = split.humans.map((player) => {
+      const at = pool.findIndex((client) => client.name === player.name);
+      const client = at >= 0 ? pool.splice(at, 1)[0] : undefined;
+      return client ? { ...player, ping: client.ping } : player;
+    });
+    return { players, bots: split.bots.length, source: "status" };
+  }
+  return {
+    players: result.players.map(toMonitorPlayer),
+    bots: result.bots.length,
+    source: "heuristic",
+  };
 }
 
 async function pollA2s(options: MonitorOptions, broadcast: () => void): Promise<void> {
@@ -186,16 +220,16 @@ async function pollA2s(options: MonitorOptions, broadcast: () => void): Promise<
     })) as QueryResult;
     monitorState.connection.online = true;
     monitorState.connection.lastError = null;
+    const resolved = resolvePlayers(result);
     monitorState.info = {
       name: result.name,
       map: result.map,
-      players: result.players.length,
+      players: resolved.players.length,
       maxplayers: result.maxplayers,
-      bots: result.bots.length,
+      bots: resolved.bots,
       password: result.password,
       ping: result.ping ?? null,
     };
-    const resolved = resolvePlayers(result);
     monitorState.players = resolved.players;
     monitorState.playersSource = resolved.source;
     samplePeakHumans(
