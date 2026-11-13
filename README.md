@@ -1,5 +1,9 @@
 # zp-monitor-bot
 
+<p align="center">
+  <img src="docs/readme/hero.png" alt="Banner ilustrativo do zp-monitor-bot (mockup com dados fictícios)" width="100%">
+</p>
+
 Command center do servidor de Counter-Strike 1.6 Zombie Plague: monitora o servidor por A2S e RCON, serve um dashboard em tempo real por WebSocket, responde perguntas com um agente Google ADK sobre uma base RAG em pgvector e opera o servidor pelo Telegram com allowlist e auditoria.
 
 O bot foi feito para um servidor específico (`server-do-junin`) e assume que o servidor CS roda em Kubernetes, com os logs acessíveis por `kubectl logs` e os arquivos do mapa por `kubectl exec`. Fora desse ambiente ele funciona em modo degradado — as seções de arquitetura e limitações dizem exatamente o que cai.
@@ -204,6 +208,24 @@ Workflows reais do repositório:
 | `validate.yml` | Workflow reutilizável `reusable-validate.yml` de `juninmd/base-actions` em PRs e pushes |
 | `docker.yml` | Build e push da imagem pelo `reusable-docker-build.yml`, com `image-name` do repositório |
 | `security.yml` | Scan de segurança pelo workflow compartilhado, em push e semanalmente (`cron 0 0 * * 0`) |
+
+## Imagens
+
+> [!NOTE]
+> **Mockups ilustrativos.** As telas abaixo foram geradas em HTML com dados fictícios (Playwright) e não são capturas de uma instalação real.
+
+<p align="center">
+  <img src="docs/readme/dashboard.png" alt="Servidor em tempo real — mockup ilustrativo com dados fictícios" width="100%">
+  <br>
+  <sub>Servidor em tempo real — dados fictícios.</sub>
+</p>
+
+<p align="center">
+  <img src="docs/readme/telegram.png" alt="Operação pelo Telegram — mockup ilustrativo com dados fictícios" width="100%">
+  <br>
+  <sub>Operação pelo Telegram — dados fictícios.</sub>
+</p>
+
 
 ## Limitações
 
