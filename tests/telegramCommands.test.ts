@@ -36,6 +36,15 @@ describe("parseTelegramCommand", () => {
     expect(parseTelegramCommand("/print")).toEqual({ kind: "map" });
     expect(parseTelegramCommand("/stats")).toEqual({ kind: "stats" });
     expect(parseTelegramCommand("/metrics")).toEqual({ kind: "stats" });
+    expect(parseTelegramCommand("/resumo")).toEqual({ kind: "summary" });
+    expect(parseTelegramCommand("/card")).toEqual({ kind: "summary" });
+    expect(parseTelegramCommand("/mvp")).toEqual({ kind: "summary" });
+    expect(parseTelegramCommand("/heatmap")).toEqual({ kind: "heatmap" });
+    expect(parseTelegramCommand("/calor")).toEqual({ kind: "heatmap" });
+    expect(parseTelegramCommand("/rag")).toEqual({ kind: "rag" });
+    expect(parseTelegramCommand("/conhecimento")).toEqual({ kind: "rag" });
+    expect(parseTelegramCommand("/sync")).toEqual({ kind: "sync" });
+    expect(parseTelegramCommand("/sync-rag")).toEqual({ kind: "sync" });
     // /map continua sendo troca de mapa auditada, não print.
     expect(parseTelegramCommand("/map")).toEqual({ kind: "unknown" });
   });

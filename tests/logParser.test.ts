@@ -9,8 +9,20 @@ describe("parseLine", () => {
       ),
     ).toEqual({
       type: "kill",
-      killer: { name: "Menor", uid: "7", steamId: "STEAM_0:0:12345", team: "CT" },
-      victim: { name: "zumbi_pedro", uid: "8", steamId: "STEAM_0:0:67890", team: "TERRORIST" },
+      killer: {
+        name: "Menor",
+        uid: "7",
+        steamId: "STEAM_0:0:12345",
+        team: "CT",
+        pos: { x: -258, y: 1340, z: 18 },
+      },
+      victim: {
+        name: "zumbi_pedro",
+        uid: "8",
+        steamId: "STEAM_0:0:67890",
+        team: "TERRORIST",
+        pos: { x: 100, y: 200, z: 30 },
+      },
       weapon: "knife",
     });
   });
@@ -21,8 +33,20 @@ describe("parseLine", () => {
     );
     expect(event).toEqual({
       type: "kill",
-      killer: { name: "Bot01", uid: "1", steamId: "BOT", team: "TERRORIST" },
-      victim: { name: "Jogador", uid: "9", steamId: "STEAM_0:1:999", team: "CT" },
+      killer: {
+        name: "Bot01",
+        uid: "1",
+        steamId: "BOT",
+        team: "TERRORIST",
+        pos: { x: 1, y: 2, z: 3 },
+      },
+      victim: {
+        name: "Jogador",
+        uid: "9",
+        steamId: "STEAM_0:1:999",
+        team: "CT",
+        pos: { x: 4, y: 5, z: 6 },
+      },
       weapon: "weapon_ak47",
     });
   });

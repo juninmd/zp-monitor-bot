@@ -6,6 +6,7 @@
  */
 
 import { config } from "./config";
+import { database } from "./database";
 import { monitorState } from "./monitorState";
 import { runRconCommand } from "./rcon";
 import { sendTelegram } from "./telegram";
@@ -27,12 +28,34 @@ export interface MapRotationDecision {
 const NO_ROTATION: MapRotationDecision = { rotate: false, targetMap: null, reason: "" };
 
 /**
- * Escolhe o próximo mapa da lista de candidatos, pulando o mapa atual.
- * Round-robin simples (primeiro que não é o atual) em vez de aleatório: dá
- * previsibilidade pra quem olha os logs/anúncios do Telegram.
+ * Escolhe o próximo mapa da lista de candidatos:
+ * - Se houver scores de retenção (média de humanos no banco), prioriza o mapa
+ *   candidato com melhor desempenho fora o atual;
+ * - Caso contrário, avança circularmente após o mapa atual para nunca oscilar
+ *   eternamente apenas entre os dois primeiros candidatos.
  */
-function pickCandidate(currentMap: string, candidateMaps: string[]): string | null {
-  return candidateMaps.find((map) => map !== currentMap) ?? null;
+function pickCandidate(
+  currentMap: string,
+  candidateMaps: string[],
+  retentionScores?: Record<string, number>,
+): string | null {
+  const valid = candidateMaps.filter((map) => map && map !== currentMap);
+  if (valid.length === 0) return null;
+
+  if (retentionScores && Object.keys(retentionScores).length > 0) {
+    const scored = [...valid].sort((a, b) => (retentionScores[b] ?? 0) - (retentionScores[a] ?? 0));
+    const best = scored[0];
+    if (best && (retentionScores[best] ?? 0) > 0) return best;
+  }
+
+  const idx = candidateMaps.indexOf(currentMap);
+  if (idx >= 0) {
+    for (let offset = 1; offset < candidateMaps.length; offset++) {
+      const candidate = candidateMaps[(idx + offset) % candidateMaps.length];
+      if (candidate && candidate !== currentMap) return candidate;
+    }
+  }
+  return valid[0] ?? null;
 }
 
 export function decideMapRotation(
@@ -41,6 +64,7 @@ export function decideMapRotation(
   minutesEmpty: number,
   minutesSinceLastRotation: number | null,
   config: MapRotationConfig,
+  retentionScores?: Record<string, number>,
 ): MapRotationDecision {
   if (!config.enabled) return NO_ROTATION;
   if (humansOnline > 0) return NO_ROTATION;
@@ -50,7 +74,7 @@ export function decideMapRotation(
     return NO_ROTATION;
   }
 
-  const targetMap = pickCandidate(currentMap, config.candidateMaps);
+  const targetMap = pickCandidate(currentMap, config.candidateMaps, retentionScores);
   if (!targetMap) return NO_ROTATION;
 
   return {
@@ -60,6 +84,27 @@ export function decideMapRotation(
   };
 }
 
+async function loadMapRetentionScores(days = 14): Promise<Record<string, number>> {
+  if (!database) return {};
+  try {
+    const rows = await database<Array<{ map: string; avg_humans: number | string }>>`
+      SELECT map, avg(humans)::float AS avg_humans
+        FROM presence_samples
+       WHERE created_at >= now() - make_interval(days => ${days})
+         AND map <> ''
+       GROUP BY map
+       HAVING count(*) >= 5
+    `;
+    const scores: Record<string, number> = {};
+    for (const row of rows) {
+      scores[row.map] = Number(row.avg_humans ?? 0);
+    }
+    return scores;
+  } catch {
+    return {};
+  }
+}
+
 // Estado do relógio de "vazio" e do cooldown, isolado do monitorState (que só
 // guarda o snapshot do servidor) - resetado sempre que aparece um humano.
 let emptySince: number | null = null;
@@ -67,7 +112,7 @@ let lastRotationAt: number | null = null;
 
 /**
  * Chamado a cada tick (ver setInterval em index.ts) pra atualizar o relógio
- * de vazio e, quando a decisão pura mandar trocar, disparar o `amx_map` e
+ * de vazio e, quando a decisão pura mandar trocar, disparar o `changelevel` e
  * avisar no Telegram o porquê.
  */
 export async function checkMapRotation(): Promise<void> {
@@ -85,21 +130,29 @@ export async function checkMapRotation(): Promise<void> {
   const minutesSinceLastRotation =
     lastRotationAt === null ? null : (Date.now() - lastRotationAt) / 60_000;
 
-  const decision = decideMapRotation(currentMap, humans, minutesEmpty, minutesSinceLastRotation, {
-    enabled: config.mapRotationEnabled,
-    emptyMinutes: config.mapRotationEmptyMinutes,
-    cooldownMinutes: config.mapRotationCooldownMinutes,
-    popularMaps: config.mapRotationPopularMaps,
-    candidateMaps: config.mapRotationCandidateMaps,
-  });
+  const scores = await loadMapRetentionScores();
+  const decision = decideMapRotation(
+    currentMap,
+    humans,
+    minutesEmpty,
+    minutesSinceLastRotation,
+    {
+      enabled: config.mapRotationEnabled,
+      emptyMinutes: config.mapRotationEmptyMinutes,
+      cooldownMinutes: config.mapRotationCooldownMinutes,
+      popularMaps: config.mapRotationPopularMaps,
+      candidateMaps: config.mapRotationCandidateMaps,
+    },
+    scores,
+  );
   if (!decision.rotate || !decision.targetMap) return;
 
   lastRotationAt = Date.now();
   emptySince = null;
   try {
-    await runRconCommand(`amx_map ${decision.targetMap}`);
+    await runRconCommand(`changelevel ${decision.targetMap}`);
     sendTelegram(`🔄 Rotação automática: ${decision.reason}`);
   } catch (err) {
-    console.error("[mapRotation] amx_map failed", err);
+    console.error("[mapRotation] changelevel failed", err);
   }
 }

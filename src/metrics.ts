@@ -64,7 +64,7 @@ function ensureDay(): void {
 }
 
 const humanKey = (name: string, steamId: string): string =>
-  steamId !== "BOT" ? `${steamId}:${name}` : `bot:${name}`;
+  steamId !== "BOT" ? steamId : `bot:${name}`;
 
 export function recordKill(k: {
   killerName: string;
@@ -72,13 +72,31 @@ export function recordKill(k: {
   victimName: string;
   victimSteamId: string;
   weapon: string;
+  map?: string;
+  killerPos?: { x: number; y: number; z: number };
+  victimPos?: { x: number; y: number; z: number };
 }): void {
   ensureDay();
   const killerBot = k.killerSteamId === "BOT";
   const victimBot = k.victimSteamId === "BOT";
   // Persiste toda kill que envolva humano; o filtro bot-x-bot fica no SQL,
   // para as agregações usarem exatamente as mesmas regras daqui.
-  if (!killerBot || !victimBot) enqueueKill(k);
+  if (!killerBot || !victimBot) {
+    enqueueKill({
+      killerName: k.killerName,
+      killerSteamId: k.killerSteamId,
+      victimName: k.victimName,
+      victimSteamId: k.victimSteamId,
+      weapon: k.weapon,
+      map: k.map,
+      killerX: k.killerPos?.x ?? null,
+      killerY: k.killerPos?.y ?? null,
+      killerZ: k.killerPos?.z ?? null,
+      victimX: k.victimPos?.x ?? null,
+      victimY: k.victimPos?.y ?? null,
+      victimZ: k.victimPos?.z ?? null,
+    });
+  }
   // Só kills entre humanos reais contam para o placar - matar bot inflaria
   // o top fragger com farm de bot.
   if (!killerBot && !victimBot) {
@@ -169,4 +187,17 @@ export function getMetrics() {
     topFraggers,
     topWeapons,
   };
+}
+
+export function getTopFraggerSteamId(): string | null {
+  ensureDay();
+  let bestKey: string | null = null;
+  let bestKills = 0;
+  for (const [key, entry] of current.players) {
+    if (entry.kills > bestKills && !key.startsWith("bot:")) {
+      bestKills = entry.kills;
+      bestKey = key;
+    }
+  }
+  return bestKey;
 }

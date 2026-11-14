@@ -1,5 +1,7 @@
 import { handlePlayerMessage, sanitizeChatReply } from "./agent/agent";
 import { config } from "./config";
+import { handleGameMasterKill, handleGameMasterMode, resetPlayerStreak } from "./gameMaster";
+import { handleInGameCommand, resetRtvVotes } from "./inGameCommands";
 import type { LogEvent } from "./logParser";
 import { renderMapImage } from "./mapImage";
 import { recordHumanChat, recordHumanSeen, recordKill } from "./metrics";
@@ -10,6 +12,7 @@ import { recordDisconnect } from "./playerStore";
 import { runRconCommand } from "./rcon";
 import { playerConnected, playerDisconnected } from "./state";
 import { escapeHtml, sendTelegram, sendTelegramPhoto } from "./telegram";
+import { recordKillTimestamp } from "./trustScore";
 
 export function handleEvent(ev: LogEvent): void {
   switch (ev.type) {
@@ -26,6 +29,7 @@ export function handleEvent(ev: LogEvent): void {
     case "disconnect": {
       const info = playerDisconnected(ev.uid, ev.steamId);
       if (ev.steamId !== "BOT") {
+        resetPlayerStreak(ev.steamId);
         void recordDisconnect(ev.steamId, info?.seconds ?? null, ev.reason);
         void announceLeave({
           name: ev.name,
@@ -48,7 +52,14 @@ export function handleEvent(ev: LogEvent): void {
         victimName: ev.victim.name,
         victimSteamId: ev.victim.steamId,
         weapon: ev.weapon,
+        map: monitorState.info?.map,
+        killerPos: ev.killer.pos,
+        victimPos: ev.victim.pos,
       });
+      if (ev.killer.steamId !== "BOT" && ev.victim.steamId !== "BOT") {
+        recordKillTimestamp(ev.killer.steamId);
+      }
+      void handleGameMasterKill(ev.killer, ev.victim, ev.weapon);
       break;
     }
     case "validated":
@@ -92,8 +103,19 @@ function relayChat(ev: Extract<LogEvent, { type: "say" }>): void {
   const context = isBot ? "" : `\n<i>${chatContext()}</i>`;
   sendTelegram(`💬 ${scope}${who}: ${escapeHtml(ev.message)}${context}`);
 
-  if (!isBot && config.agentTriggerRegex.test(ev.message)) {
-    void handleAgentReply(ev);
+  if (!isBot) {
+    void processChatTriggers(ev);
+  }
+}
+
+async function processChatTriggers(ev: Extract<LogEvent, { type: "say" }>): Promise<void> {
+  const handled = await handleInGameCommand(
+    { name: ev.name, steamId: ev.steamId },
+    ev.message,
+  ).catch(() => false);
+  if (handled) return;
+  if (config.agentTriggerRegex.test(ev.message)) {
+    await handleAgentReply(ev);
   }
 }
 
@@ -119,7 +141,14 @@ async function handleAgentReply(ev: Extract<LogEvent, { type: "say" }>): Promise
 /** Consome as transições do polling; só a troca de mapa vira aviso, com o print. */
 export function handleMonitorEvents(): void {
   for (const event of consumeMonitorEvents()) {
-    if (event.kind === "map_change") void announceMapChange(event.message, event.map ?? "");
+    if (event.kind === "map_change") {
+      resetRtvVotes();
+      void announceMapChange(event.message, event.map ?? "");
+    }
+  }
+  const mode = monitorState.telemetry.round?.mode;
+  if (monitorState.telemetry.connected && mode) {
+    void handleGameMasterMode(mode);
   }
 }
 

@@ -72,4 +72,12 @@ export const config = {
     .split(",")
     .map((s) => s.trim())
     .filter(Boolean),
+
+  retentionDays: positiveNumber("RETENTION_DAYS", "90"),
+  gameMasterEnabled: (process.env.GAME_MASTER_ENABLED ?? "true") !== "false",
+  gameMasterCooldownMin: positiveNumber("GAME_MASTER_COOLDOWN_MIN", "3"),
+  rtvEnabled: (process.env.RTV_ENABLED ?? "true") !== "false",
+  rtvCooldownMin: positiveNumber("RTV_COOLDOWN_MIN", "10"),
+  trustAlertEnabled: (process.env.TRUST_ALERT_ENABLED ?? "true") !== "false",
+  podKnowledgeEnabled: (process.env.POD_KNOWLEDGE_ENABLED ?? "true") !== "false",
 };

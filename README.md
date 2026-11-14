@@ -27,18 +27,19 @@ Esta é a parte do projeto que mais importa, porque o bot tem RCON e um LLM no m
 
 | Área | Comportamento |
 |---|---|
-| Monitor A2S | Consulta o servidor com `gamedig` a cada `POLL_INTERVAL_MS` (3 s por padrão): nome, mapa, jogadores, bots, ping e histórico em memória |
-| Separação humano/bot | Usa a tabela do RCON `status`; se ela estiver velha ou indisponível, cai numa heurística e sinaliza isso no dashboard e no `/status` |
-| RCON | Consulta periódica para FPS do servidor e telemetria do plugin Zombie Plague (`zp_telemetry_snapshot`, `zp_telemetry_positions`) |
-| Dashboard | `public/index.html` servido em `/`, com estado por WebSocket: mapa, jogadores reais, ping, FPS, zumbis × humanos, gráfico de atividade, tabela de online, eventos ZP, ranking e pico do dia |
-| Métricas | Kills, mortes, pico de humanos, jogadores distintos, linhas de chat, top fraggers e armas do dia; ranking de 7 dias e recorde histórico; kills ficam até 10 s em buffer e são descarregadas no shutdown |
-| Radar | Desenha posição e direção dos jogadores em PNG a partir da telemetria do plugin |
-| Print do mapa | Lê `overviews/<mapa>.txt` e o bitmap do `layer { IMAGE }` do pod do servidor via `kubectl exec` e sobrepõe as posições; sem calibração/overview, usa o radar local |
-| Log tail | Acompanha `kubectl logs` do container do servidor, parseia conexão, desconexão, chat, kills e troca de mapa, e alimenta notificações, métricas e o agente |
-| Agente no jogo | Jogador fala `!ia`, `!bot` ou `!admin` (regex configurável) e o agente responde no chat; pode respawnar, dar AP, desprender e trocar de mapa, sempre com cooldown |
-| RAG | Ingere `knowledge/*.md` no boot, gera embeddings com `EMBEDDING_MODEL` e recupera os trechos mais próximos do pgvector para responder no Telegram |
-| Telegram | Comandos de status, métricas, ranking, radar, mapa, auditoria, RCON e perguntas; notificações de entrada/saída, chat e troca de mapa |
-| Rotação de mapa | Se o servidor ficar sem humanos por `MAP_ROTATION_EMPTY_MINUTES` num mapa fora da lista de populares, troca para um candidato, respeitando o cooldown global |
+| Monitor A2S | Consulta o servidor com `gamedig` a cada `POLL_INTERVAL_MS` (3 s por padrão): nome, mapa, jogadores, bots, ping e histórico em memória (reidratado de `presence_samples` no boot) |
+| Separação humano/bot | Usa a tabela do RCON `status` (capturando também o `SteamID`); se ela estiver velha ou indisponível, cai numa heurística e sinaliza isso no dashboard e no `/status` |
+| RCON | Consulta periódica para FPS do servidor e telemetria do plugin Zombie Plague (`zp_telemetry_snapshot`, `zp_telemetry_positions` sob demanda quando há clientes WS) com parser resiliente a respostas truncadas |
+| Dashboard | `public/index.html` (**ZP Command Center 2.0**) servido em `/`, com WebSocket: mapa, radar tático e heatmap de kills em `<canvas>`, jogadores reais, inspetor de jogador (Steam + Trust Score + rivalidades), ping, FPS, zumbis × humanos, gráfico de atividade, eventos ZP, auditoria, card MVP PNG e ranking |
+| Métricas e Heatmap | Kills (com coordenadas 3D `x, y, z` do mapa), mortes, pico de humanos, jogadores distintos, linhas de chat, top fraggers, rivalidades e armas; limpeza automática após `RETENTION_DAYS` |
+| Radar e Heatmap PNG | Desenha posição/direção dos jogadores e mapas de calor de abates sobre o overview do mapa (ou grade tática auto-escalável) |
+| Card Visual MVP | Gera relatório PNG (`1200×675`) com KPIs do dia, avatar do MVP, armas letais e Top 5 fraggers (`/resumo` ou `/api/summary.png`) |
+| Log tail | Acompanha `kubectl logs` do container do servidor, parseia conexão, desconexão, chat, kills (com coordenadas) e troca de mapa, e alimenta notificações, Game Master, métricas e agente |
+| Game Master & Comandos | Narra kill streaks (5/10/15) e modos especiais ZP no HUD (`amx_csay`) com cooldown global; comandos rápidos determinísticos `!stats`, `!rank`, `!rival`, `!rtv <mapa>` e `!comandos` respondem sem gastar LLM |
+| Trust Score silencioso | Avalia VAC/game bans, horas de CS, trocas de nick, ReUnion e picos de kills/min no inspetor e alerta o Telegram apenas em `high_risk` |
+| Agente no jogo e RAG | Jogador fala `!ia`, `!bot` ou `!admin` e o agente responde com contexto vivo do servidor e busca RAG (pgvector + sincronização viva de `zp_*.ini` e `mapcycle.txt` do pod), sempre com auditoria e cooldown |
+| Telegram | Comandos com botões inline interativos (`/status`, `/stats`, `/ranking`, `/radar`, `/mapa`, `/heatmap`, `/resumo`, `/rag`, `/sync`, `/audit`, `/rcon`, `/map`, `/ask`); notificações de entrada/saída, chat e troca de mapa |
+| Rotação de mapa | Se o servidor ficar sem humanos por `MAP_ROTATION_EMPTY_MINUTES` num mapa fora da lista de populares, troca via `changelevel` priorizando retenção histórica (`presence_samples`) ou progressão circular |
 
 ## Comandos do Telegram
 
@@ -47,27 +48,39 @@ O parser (`src/telegramCommands.ts`) aceita exatamente:
 | Comando | Aliases | O que faz |
 |---|---|---|
 | `/help` | `/start` | Lista os comandos |
-| `/status` | `/players` | Servidor, mapa, jogadores e telemetria |
+| `/status` | `/players` | Servidor, mapa, jogadores e telemetria (com botões rápidos inline) |
 | `/stats` | `/metrics` | Métricas do dia: kills, mortes, pico, distintos, chat, top fraggers e armas |
 | `/ranking` | `/top` | Ranking de 7 dias e recorde de pico |
 | `/radar` | — | PNG com posição e direção |
 | `/mapa` | `/print`, `/screenshot` | Print do mapa atual |
-| `/ask <pergunta>` | texto livre (2–1000 caracteres) | Pergunta ao agente com contexto do pgvector |
+| `/heatmap` | `/calor` | Mapa de calor (PNG) das kills no mapa atual |
+| `/resumo` | `/card`, `/mvp` | Card visual PNG (1200×675) com KPIs e MVP do dia |
+| `/rag` | `/conhecimento` | Fontes e chunks indexados no pgvector |
+| `/sync` | `/sync-rag` | Re-sincroniza `zp_*.ini` e `mapcycle.txt` do pod no RAG |
+| `/ask <pergunta>` | texto livre (2–1000 caracteres) | Pergunta ao agente com contexto do pgvector e estado vivo |
 | `/rcon status\|stats\|users\|zp_telemetry_snapshot` | — | Console remoto auditado |
 | `/map <nome>` | — | `changelevel` auditado, nome com 3–32 caracteres `[a-z0-9_-]` |
 | `/audit` | — | Últimas ações registradas |
 
-Qualquer outra coisa que comece com `/` cai em `unknown` e devolve a ajuda. No chat do jogo, o gatilho padrão é `!ia`, `!bot`, `!admin` ou a palavra `bot` (`AGENT_TRIGGER_REGEX`).
+Qualquer outra coisa que comece com `/` cai em `unknown` e devolve a ajuda. No chat do jogo, os comandos rápidos `!comandos`, `!stats`, `!rank`, `!rival` e `!rtv <mapa>` respondem diretamente via HUD; o gatilho padrão da IA é `!ia`, `!bot`, `!admin` ou a palavra `bot` (`AGENT_TRIGGER_REGEX`).
 
 ## Endpoints
 
 | Método | Rota | Resposta |
 |---|---|---|
-| `GET` | `/` | Dashboard HTML |
-| `GET` | `/health` | `200` quando o bootstrap terminou e o banco responde; `503` caso contrário. Inclui revisão (`GIT_SHA`), uptime, chunks ingeridos no boot e totais do pgvector |
+| `GET` | `/` | Dashboard HTML (**ZP Command Center 2.0**) |
+| `GET` | `/health` | `200` quando o bootstrap terminou e o banco responde; `503` caso contrário. Inclui revisão (`GIT_SHA`), uptime, chunks ingeridos, sync do pod e totais do pgvector |
+| `GET` | `/metrics` | Métricas no formato Prometheus (`text/plain; version=0.0.4`) |
 | `GET` | `/stats` | Estado resumido do monitor |
-| `GET` | `/api/state` | Estado completo (mesmo payload do WebSocket) |
-| `GET` | `/api/today` | Jogadores do dia, ranking de 7 dias e recorde de pico |
+| `GET` | `/api/state` | Estado completo (mesmo payload do WebSocket, incluindo `radar`) |
+| `GET` | `/api/today` | Jogadores do dia, ranking de 7 dias, recorde de pico, métricas diárias e votos `!rtv` |
+| `GET` | `/api/audit` | Últimos 20 eventos de auditoria |
+| `GET` | `/api/rag` | Estatísticas e fontes indexadas no RAG |
+| `GET` | `/api/player/:steamId` | Perfil Steam, resumo de K/D, rivalidades e Trust Score silencioso |
+| `GET` | `/api/map/meta/:map` | Calibração de overview e pontos do heatmap do mapa |
+| `GET` | `/api/map/image/:map` | PNG base limpo (chroma-key aplicado) do overview do mapa |
+| `GET` | `/api/map/heatmap/:map/image.png` | PNG do mapa de calor de kills do mapa |
+| `GET` | `/api/summary.png` | Card visual PNG (1200×675) de resumo diário e MVP |
 | `POST` | `/api/telegram` | `{ "text": "...", "chatId"?: "...", "actor"?: "..." }`, autenticado por Bearer; devolve `{ "reply": "..." }` |
 | `WS` | `/ws` | Assina o canal `state` e recebe `{ "type": "state", "data": ... }` |
 
@@ -96,18 +109,21 @@ flowchart LR
 
 | Arquivo | Papel |
 |---|---|
-| `src/index.ts` | Elysia: rotas, WebSocket, bootstrap e shutdown gracioso |
+| `src/index.ts` | Elysia: rotas, WebSocket, Prometheus, bootstrap e shutdown gracioso |
 | `src/config.ts` | Lê e valida as variáveis de ambiente no import |
-| `src/monitorState.ts` | Polling A2S, RCON, histórico e estado publicado |
+| `src/monitorState.ts` | Polling A2S, RCON, radar, histórico e estado publicado |
 | `src/goldsrcRcon.ts`, `src/rcon.ts` | Protocolo RCON do GoldSrc e parsers tolerantes a resposta truncada |
-| `src/logTail.ts`, `src/logParser.ts` | Stream de logs do pod e parser de eventos |
+| `src/logTail.ts`, `src/logParser.ts` | Stream de logs do pod e parser de eventos (inclui coords 3D em kills) |
 | `src/notifier.ts`, `src/playerAnnounce.ts` | Notificações e perfil/visitas de jogador |
-| `src/metrics.ts`, `src/metricsStore.ts`, `src/metricsQueries.ts` | Métricas em memória, buffer de kills e consultas |
-| `src/agent/*` | ADK, tools com cooldown, sessões, cliente LiteLLM e RAG |
-| `src/knowledge.ts`, `src/knowledgeStore.ts`, `src/embeddings.ts` | Chunking, ingestão e busca vetorial |
-| `src/database.ts` | Tabelas `knowledge_chunks`, `audit_events`, `player_sessions` e `auditEvent()` |
-| `src/telegram.ts`, `src/telegramBot.ts`, `src/telegramCommands.ts` | Envio, polling, allowlist e parser de comandos |
-| `src/mapImage.ts`, `src/radar.ts`, `src/podFiles.ts` | Print do overview e radar |
+| `src/gameMaster.ts`, `src/inGameCommands.ts` | Narração de streaks/modos ZP e comandos rápidos (`!stats`, `!rival`, `!rtv`) |
+| `src/trustScore.ts`, `src/steamSignals.ts` | Índice de confiança silencioso e alerta Telegram em `high_risk` |
+| `src/metrics.ts`, `src/metricsStore.ts`, `src/metricsQueries.ts` | Métricas em memória, buffer de kills com coords, heatmap e consultas |
+| `src/agent/*` | ADK, tools com cooldown/auditoria, sessões, cliente LiteLLM e RAG |
+| `src/knowledge.ts`, `src/knowledgeStore.ts`, `src/podKnowledge.ts`, `src/embeddings.ts` | Chunking, ingestão de docs e configs do pod, e busca vetorial |
+| `src/database.ts` | Tabelas `knowledge_chunks`, `audit_events`, `player_sessions`, retenção e `auditEvent()` |
+| `src/telegram.ts`, `src/telegramBot.ts`, `src/telegramCommands.ts` | Envio, botões inline, polling, allowlist e parser de comandos |
+| `src/mapImage.ts`, `src/radar.ts`, `src/summaryCard.ts`, `src/podFiles.ts` | Print do overview, heatmap PNG, radar e Card MVP PNG |
+| `src/prometheus.ts` | Exportador de métricas `/metrics` |
 
 No boot o processo cria as tabelas, reidrata as métricas do dia, ingere `knowledge/*.md` e só então marca `ready`. Um restart no meio da noite não pode reportar “0 kills hoje” com o servidor cheio. O `/health` só fica verde depois disso.
 
@@ -183,6 +199,13 @@ Opcionais (padrão entre parênteses):
 | `MAP_ROTATION_COOLDOWN_MINUTES` | `60` | Intervalo mínimo entre rotações |
 | `MAP_ROTATION_POPULAR_MAPS` | vazio | Mapas que nunca são trocados automaticamente |
 | `MAP_ROTATION_CANDIDATE_MAPS` | vazio | Lista de destinos possíveis |
+| `RETENTION_DAYS` | `90` | Retenção em dias para `audit_events`, `kill_events` e `presence_samples` |
+| `GAME_MASTER_ENABLED` | `true` | Liga narração de kill streaks e modos especiais no HUD |
+| `GAME_MASTER_COOLDOWN_MIN` | `3` | Cooldown global entre anúncios do Game Master |
+| `RTV_ENABLED` | `true` | Habilita votação `!rtv <mapa>` no chat do jogo |
+| `RTV_COOLDOWN_MIN` | `10` | Cooldown global entre trocas via RTV |
+| `TRUST_ALERT_ENABLED` | `true` | Envia alerta no Telegram quando um jogador `high_risk` (VAC/game ban) entra |
+| `POD_KNOWLEDGE_ENABLED` | `true` | Sincroniza `zp_*.ini` e `mapcycle.txt` do pod no pgvector |
 
 O `.env.example` traz valores de exemplo do cluster (inclusive `AGENT_MODELS` com modelos específicos); troque-os pelo seu ambiente.
 

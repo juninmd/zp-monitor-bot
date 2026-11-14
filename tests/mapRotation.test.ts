@@ -58,3 +58,28 @@ test("feature desligada nunca roda", () => {
   });
   expect(decision.rotate).toBe(false);
 });
+
+test("avança circularmente entre 3 candidatos sem oscilar A <-> B", () => {
+  const cfg: MapRotationConfig = {
+    ...baseConfig,
+    popularMaps: [],
+    candidateMaps: ["zm_a", "zm_b", "zm_c"],
+  };
+  expect(decideMapRotation("zm_a", 0, 30, null, cfg).targetMap).toBe("zm_b");
+  expect(decideMapRotation("zm_b", 0, 30, null, cfg).targetMap).toBe("zm_c");
+  expect(decideMapRotation("zm_c", 0, 30, null, cfg).targetMap).toBe("zm_a");
+});
+
+test("prioriza mapa candidato com maior score de retenção quando disponível", () => {
+  const cfg: MapRotationConfig = {
+    ...baseConfig,
+    popularMaps: [],
+    candidateMaps: ["zm_a", "zm_b", "zm_c"],
+  };
+  const decision = decideMapRotation("zm_a", 0, 30, null, cfg, {
+    zm_a: 9,
+    zm_b: 2.1,
+    zm_c: 6.5,
+  });
+  expect(decision.targetMap).toBe("zm_c");
+});
