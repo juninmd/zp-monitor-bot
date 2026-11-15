@@ -149,3 +149,14 @@ export async function knowledgeStats(): Promise<KnowledgeStats> {
     latestUpdate: row?.latest_update?.toISOString() ?? null,
   };
 }
+
+export async function listKnowledgeSources(): Promise<Array<{ source: string; chunks: number }>> {
+  if (!database) return [];
+  const rows = await database<Array<{ source: string; chunks: number | string }>>`
+    SELECT source, count(*)::int AS chunks
+      FROM knowledge_chunks
+     GROUP BY source
+     ORDER BY source ASC
+  `;
+  return rows.map((r) => ({ source: r.source, chunks: Number(r.chunks) }));
+}

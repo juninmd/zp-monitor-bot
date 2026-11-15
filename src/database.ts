@@ -93,15 +93,43 @@ export async function databaseHealth(): Promise<boolean> {
   return rows[0]?.ok === 1;
 }
 
-export async function recentAudit(
-  limit = 10,
-): Promise<Array<{ action: string; request: string; status: string; created_at: Date }>> {
+export interface AuditRow {
+  actor: string;
+  action: string;
+  request: string;
+  response: string | null;
+  status: string;
+  created_at: Date;
+}
+
+export async function recentAudit(limit = 10): Promise<AuditRow[]> {
   if (!database) return [];
   return database.unsafe(
-    `SELECT action, request, status, created_at
+    `SELECT actor, action, request, response, status, created_at
        FROM audit_events
       ORDER BY created_at DESC
       LIMIT $1`,
     [limit],
   );
+}
+
+/** Remove registros operacionais mais antigos que `retentionDays` dias (best-effort). */
+export async function pruneOldRecords(retentionDays = config.retentionDays): Promise<void> {
+  if (!database || retentionDays <= 0) return;
+  try {
+    await database`
+      DELETE FROM audit_events
+       WHERE created_at < now() - make_interval(days => ${retentionDays})
+    `;
+    await database`
+      DELETE FROM kill_events
+       WHERE created_at < now() - make_interval(days => ${retentionDays})
+    `;
+    await database`
+      DELETE FROM presence_samples
+       WHERE created_at < now() - make_interval(days => ${retentionDays})
+    `;
+  } catch (error) {
+    console.warn("[database] pruneOldRecords falhou", error);
+  }
 }

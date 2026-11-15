@@ -255,3 +255,96 @@ export async function renderMapImage(
   drawMapLabel(ctx, image.width, image.height, map);
   return canvas.toBuffer("image/png");
 }
+
+export async function renderOverviewBase(
+  map: string,
+): Promise<{ png: Buffer; overview: Overview; width: number; height: number } | null> {
+  if (!map) return null;
+  const { overview, image } = await loadAssets(map);
+  if (!image || !overview) return null;
+
+  const canvas = createCanvas(image.width, image.height);
+  const ctx = canvas.getContext("2d");
+  const base = ctx.createImageData(image.width, image.height);
+  base.data.set(image.rgba);
+  maskChromaKey(base.data);
+  ctx.putImageData(base, 0, 0);
+  return {
+    png: canvas.toBuffer("image/png"),
+    overview,
+    width: image.width,
+    height: image.height,
+  };
+}
+
+export async function renderHeatmapImage(
+  map: string,
+  points: Array<{ x: number; y: number }>,
+): Promise<Buffer | null> {
+  if (!map || points.length === 0) return null;
+  const { overview, image } = await loadAssets(map);
+
+  const width = image && overview ? image.width : 640;
+  const height = image && overview ? image.height : 640;
+  const canvas = createCanvas(width, height);
+  const ctx = canvas.getContext("2d");
+
+  let project: (x: number, y: number) => [number, number] | null;
+  if (image && overview) {
+    const base = ctx.createImageData(width, height);
+    base.data.set(image.rgba);
+    maskChromaKey(base.data);
+    ctx.putImageData(base, 0, 0);
+    project = (x, y) => projectToPixels(overview, x, y, width, height);
+  } else {
+    ctx.fillStyle = "#0e131b";
+    ctx.fillRect(0, 0, width, height);
+    ctx.strokeStyle = "#1d2636";
+    ctx.lineWidth = 1;
+    for (let i = 1; i < 8; i++) {
+      const p = (width / 8) * i;
+      ctx.beginPath();
+      ctx.moveTo(p, 0);
+      ctx.lineTo(p, height);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.moveTo(0, p);
+      ctx.lineTo(width, p);
+      ctx.stroke();
+    }
+    const xs = points.map((p) => p.x);
+    const ys = points.map((p) => p.y);
+    const minX = Math.min(...xs);
+    const maxX = Math.max(...xs);
+    const minY = Math.min(...ys);
+    const maxY = Math.max(...ys);
+    const rx = Math.max(200, maxX - minX);
+    const ry = Math.max(200, maxY - minY);
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const margin = 48;
+    project = (x, y) => [
+      margin + ((x - (cx - rx / 2)) / rx) * (width - 2 * margin),
+      height - (margin + ((y - (cy - ry / 2)) / ry) * (height - 2 * margin)),
+    ];
+  }
+
+  const radius = Math.max(14, Math.round(Math.min(width, height) / 36));
+  ctx.globalCompositeOperation = "lighter";
+  for (const pt of points) {
+    const at = project(pt.x, pt.y);
+    if (!at) continue;
+    const grad = ctx.createRadialGradient(at[0], at[1], 1, at[0], at[1], radius);
+    grad.addColorStop(0, "rgba(255, 80, 50, 0.35)");
+    grad.addColorStop(0.5, "rgba(245, 176, 65, 0.16)");
+    grad.addColorStop(1, "rgba(245, 176, 65, 0)");
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(at[0], at[1], radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  ctx.globalCompositeOperation = "source-over";
+
+  drawMapLabel(ctx, width, height, `${map} · ${points.length} kills`);
+  return canvas.toBuffer("image/png");
+}

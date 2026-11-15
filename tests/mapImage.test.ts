@@ -62,7 +62,9 @@ mock.module("../src/podFiles", () => ({
   },
 }));
 
-const { clearMapAssetCache, renderMapImage } = await import("../src/mapImage");
+const { clearMapAssetCache, renderHeatmapImage, renderMapImage, renderOverviewBase } = await import(
+  "../src/mapImage"
+);
 
 describe("renderMapImage", () => {
   test("monta o PNG a partir do overview do pod e sobrepõe os jogadores", async () => {
@@ -157,5 +159,38 @@ describe("renderMapImage", () => {
     await renderMapImage("zm_a", []);
     // Só o mapa atual fica em cache: voltar para zm_a lê o pod de novo.
     expect(fetched).toHaveLength(3);
+  });
+
+  test("renderOverviewBase retorna PNG limpo e calibração do mapa", async () => {
+    clearMapAssetCache();
+    const base = await renderOverviewBase("zm_test");
+    expect(base).not.toBeNull();
+    expect(base?.png.subarray(1, 4).toString("ascii")).toBe("PNG");
+    expect(base?.width).toBe(128);
+    expect(base?.height).toBe(96);
+    expect(base?.overview.kind).toBe("goldsrc");
+  });
+
+  test("renderHeatmapImage renderiza sobre overview ou grade tática sem overview", async () => {
+    clearMapAssetCache();
+    const withOverview = await renderHeatmapImage("zm_test", [
+      { x: 0, y: 0 },
+      { x: 400, y: -200 },
+    ]);
+    expect(withOverview?.subarray(1, 4).toString("ascii")).toBe("PNG");
+
+    clearMapAssetCache();
+    overviewAvailable = false;
+    try {
+      const fallbackGrid = await renderHeatmapImage("zm_sem_overview", [
+        { x: -300, y: 200 },
+        { x: 500, y: -400 },
+      ]);
+      expect(fallbackGrid?.subarray(1, 4).toString("ascii")).toBe("PNG");
+    } finally {
+      overviewAvailable = true;
+    }
+
+    expect(await renderHeatmapImage("zm_test", [])).toBeNull();
   });
 });

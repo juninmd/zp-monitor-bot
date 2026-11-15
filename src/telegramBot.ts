@@ -1,23 +1,43 @@
 import { answerZombieQuestion } from "./agent/agent";
 import { config } from "./config";
 import { auditEvent, recentAudit } from "./database";
-import { retrieveKnowledge } from "./knowledgeStore";
-import { renderMapImage } from "./mapImage";
+import { listKnowledgeSources, retrieveKnowledge } from "./knowledgeStore";
+import { renderHeatmapImage, renderMapImage } from "./mapImage";
 import { getMetrics } from "./metrics";
+import { loadHeatmapPoints } from "./metricsQueries";
 import { getPlayerCounts, monitorState } from "./monitorState";
 import { historyText } from "./notifier";
+import { syncPodKnowledge } from "./podKnowledge";
 import { renderRadar } from "./radar";
 import { getPositions, runRconCommand } from "./rcon";
 import { formatDuration } from "./steamId";
-import { sendTelegramPhotoTo, sendTelegramTo } from "./telegram";
+import { buildTodaySummaryData, renderSummaryCard } from "./summaryCard";
+import {
+  answerCallbackQuery,
+  type InlineKeyboardMarkup,
+  sendTelegramPhotoTo,
+  sendTelegramTo,
+} from "./telegram";
 import { parseTelegramCommand } from "./telegramCommands";
+
+interface TelegramUser {
+  id: number;
+  username?: string;
+  first_name?: string;
+}
 
 interface TelegramUpdate {
   update_id: number;
   message?: {
     text?: string;
     chat: { id: number };
-    from?: { id: number; username?: string; first_name?: string };
+    from?: TelegramUser;
+  };
+  callback_query?: {
+    id: string;
+    data?: string;
+    from: TelegramUser;
+    message?: { chat: { id: number } };
   };
 }
 
@@ -30,15 +50,43 @@ const HELP = `Comandos:
 /status — servidor, mapa e jogadores
 /stats — métricas do dia (kills, pico, distintos)
 /ranking — ranking de 7 dias e recorde de pico
+/resumo — card visual PNG do MVP e métricas do dia
 /radar — posição e direção dos jogadores
 /mapa — print do mapa atual
+/heatmap — mapa de calor de kills do mapa atual
 /ask <pergunta> — dúvidas sobre Zombie Plague
+/rag — fontes indexadas no pgvector
+/sync — sincroniza configs do pod no RAG
 /rcon status|stats|users|zp_telemetry_snapshot — console remoto auditado
 /map <nome> — troca de mapa auditada
 /audit — últimas ações`;
 
-function actorName(update: TelegramUpdate): string {
-  const from = update.message?.from;
+const STATUS_KEYBOARD: InlineKeyboardMarkup = {
+  inline_keyboard: [
+    [
+      { text: "🔄 Atualizar", callback_data: "cmd:/status" },
+      { text: "📊 Stats", callback_data: "cmd:/stats" },
+      { text: "🖼️ Resumo", callback_data: "cmd:/resumo" },
+    ],
+    [
+      { text: "🗺️ Print Mapa", callback_data: "cmd:/mapa" },
+      { text: "📡 Radar", callback_data: "cmd:/radar" },
+      { text: "🔥 Heatmap", callback_data: "cmd:/heatmap" },
+    ],
+  ],
+};
+
+const MAP_KEYBOARD: InlineKeyboardMarkup = {
+  inline_keyboard: [
+    [
+      { text: "🔄 Atualizar Print", callback_data: "cmd:/mapa" },
+      { text: "📡 Radar", callback_data: "cmd:/radar" },
+      { text: "🔥 Heatmap", callback_data: "cmd:/heatmap" },
+    ],
+  ],
+};
+
+function actorFromUser(from?: TelegramUser): string {
   return from?.username ? `@${from.username}` : (from?.first_name ?? String(from?.id ?? "unknown"));
 }
 
@@ -104,13 +152,19 @@ export async function handleTelegramText(
   text: string,
   chatId: string,
   actor: string,
+  interactive = false,
 ): Promise<string | null> {
   const parsed = parseTelegramCommand(text);
   if (parsed.kind === "help" || parsed.kind === "unknown") {
     return HELP;
   }
   if (parsed.kind === "status") {
-    return statusText();
+    const reply = statusText();
+    if (interactive) {
+      await sendTelegramTo(chatId, reply, false, STATUS_KEYBOARD);
+      return null;
+    }
+    return reply;
   }
   if (parsed.kind === "stats") {
     return statsText();
@@ -118,6 +172,21 @@ export async function handleTelegramText(
   if (parsed.kind === "ranking") {
     const lines = await historyText();
     return lines.length ? lines.join("\n") : "Sem histórico suficiente ainda.";
+  }
+  if (parsed.kind === "summary") {
+    try {
+      const data = await buildTodaySummaryData();
+      const png = await renderSummaryCard(data);
+      await sendTelegramPhotoTo(
+        chatId,
+        png,
+        `🖼️ <b>Resumo de ${data.day}</b> · ${data.kills} kills · pico ${data.peakHumans} reais`,
+        STATUS_KEYBOARD,
+      );
+      return null;
+    } catch (error) {
+      return `❌ Resumo indisponível: ${error instanceof Error ? error.message : String(error)}`;
+    }
   }
   if (parsed.kind === "radar") {
     try {
@@ -128,6 +197,7 @@ export async function handleTelegramText(
           chatId,
           png,
           `🗺️ Radar (posição + direção)\n🔴▲ zumbi  🔵● humano\n${countsCaption()}`,
+          MAP_KEYBOARD,
         );
         return null;
       }
@@ -146,6 +216,7 @@ export async function handleTelegramText(
           chatId,
           png,
           `🗺️ Print do mapa: ${map}\n🔴▲ zumbi  🔵● humano\n${countsCaption()}`,
+          MAP_KEYBOARD,
         );
         return null;
       }
@@ -156,13 +227,42 @@ export async function handleTelegramText(
       return `❌ Print indisponível: ${error instanceof Error ? error.message : String(error)}`;
     }
   }
+  if (parsed.kind === "heatmap") {
+    try {
+      const map = monitorState.info?.map ?? "";
+      if (!map) return "Mapa desconhecido.";
+      const points = await loadHeatmapPoints(map, 14);
+      const png = await renderHeatmapImage(map, points);
+      if (png) {
+        await sendTelegramPhotoTo(
+          chatId,
+          png,
+          `🔥 Heatmap de kills/infecções: <b>${map}</b> (${points.length} eventos)`,
+          MAP_KEYBOARD,
+        );
+        return null;
+      }
+      return `Ainda não há kills com coordenadas registradas em ${map}.`;
+    } catch (error) {
+      return `❌ Heatmap indisponível: ${error instanceof Error ? error.message : String(error)}`;
+    }
+  }
+  if (parsed.kind === "rag") {
+    const sources = await listKnowledgeSources();
+    if (!sources.length) return "Base RAG vazia ou Postgres desconectado.";
+    return `📚 Fontes no pgvector:\n${sources.map((s) => `• ${s.source}: ${s.chunks} chunks`).join("\n")}`;
+  }
+  if (parsed.kind === "sync") {
+    const result = await syncPodKnowledge();
+    return `🔄 Sync RAG do pod: ${result.filesRead} arquivo(s) lido(s), ${result.chunksIndexed} chunk(s) indexado(s).`;
+  }
   if (parsed.kind === "audit") {
     const rows = await recentAudit();
     return rows.length
       ? rows
           .map(
             (row) =>
-              `${row.created_at.toISOString()} ${row.status} ${row.action}: ${row.request.slice(0, 100)}`,
+              `${row.created_at.toISOString()} [${row.actor}] ${row.status} ${row.action}: ${row.request.slice(0, 100)}`,
           )
           .join("\n")
       : "Auditoria vazia.";
@@ -236,10 +336,34 @@ export async function handleTelegramText(
 }
 
 async function handleUpdate(update: TelegramUpdate): Promise<void> {
+  if (update.callback_query) {
+    const cq = update.callback_query;
+    const chatId = String(cq.message?.chat.id ?? "");
+    const actor = actorFromUser(cq.from);
+    if (chatId !== config.telegramChatId) {
+      await auditEvent({
+        chatId,
+        actor,
+        action: "security",
+        request: cq.data ?? "callback_query",
+        response: "chat não autorizado",
+        status: "denied",
+      });
+      return;
+    }
+    await answerCallbackQuery(cq.id);
+    if (cq.data?.startsWith("cmd:")) {
+      const cmd = cq.data.slice(4);
+      const reply = await handleTelegramText(cmd, chatId, actor, true);
+      if (reply) await sendTelegramTo(chatId, reply);
+    }
+    return;
+  }
+
   const message = update.message;
   if (!message?.text) return;
   const chatId = String(message.chat.id);
-  const actor = actorName(update);
+  const actor = actorFromUser(message.from);
   if (chatId !== config.telegramChatId) {
     await auditEvent({
       chatId,
@@ -251,7 +375,7 @@ async function handleUpdate(update: TelegramUpdate): Promise<void> {
     });
     return;
   }
-  const reply = await handleTelegramText(message.text, chatId, actor);
+  const reply = await handleTelegramText(message.text, chatId, actor, true);
   if (reply) await sendTelegramTo(chatId, reply);
 }
 

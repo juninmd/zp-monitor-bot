@@ -15,6 +15,18 @@ const lastActivity = new Map<string, number>();
 export async function getOrCreatePlayerSession(steamId: string) {
   const now = Date.now();
   const ttlMs = config.agentSessionTtlMin * 60 * 1000;
+  if (lastActivity.size > 150) {
+    for (const [id, at] of lastActivity) {
+      if (now - at > ttlMs) {
+        lastActivity.delete(id);
+        await sessionService.deleteSession({
+          appName: APP_NAME,
+          userId: id,
+          sessionId: id,
+        });
+      }
+    }
+  }
   const last = lastActivity.get(steamId);
   if (last !== undefined && now - last > ttlMs) {
     await sessionService.deleteSession({

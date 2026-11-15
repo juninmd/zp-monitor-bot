@@ -6,72 +6,703 @@
   <title>ZP Command Center</title>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9"></script>
   <style>
-    :root { color-scheme: dark; --bg:#080b10; --panel:#111720; --line:#243044; --text:#e8eef8; --muted:#8fa0b8; --z:#ff4d5e; --h:#4ba3ff; --ok:#48d597; }
-    * { box-sizing:border-box } body { margin:0; background:radial-gradient(circle at 15% 0,#172033 0,transparent 32%),var(--bg); color:var(--text); font:14px Inter,system-ui,sans-serif }
-    header,main { width:min(1180px,calc(100% - 32px)); margin:auto } header { padding:28px 0 18px; display:flex; justify-content:space-between; align-items:end }
-    h1 { margin:0; font-size:clamp(24px,4vw,42px); letter-spacing:-.04em } .eyebrow { color:var(--ok); text-transform:uppercase; letter-spacing:.18em; font-size:11px }
-    .grid { display:grid; grid-template-columns:repeat(12,1fr); gap:14px; padding-bottom:32px }.card { grid-column:span 3; background:linear-gradient(145deg,#131b27,#0d121a); border:1px solid var(--line); border-radius:16px; padding:18px; box-shadow:0 14px 40px #0005 }
-    .wide { grid-column:span 8 }.side { grid-column:span 4 }.metric { font-size:30px; font-weight:750; margin-top:8px }.muted { color:var(--muted) }.status { display:flex; gap:8px; align-items:center }.dot { width:9px;height:9px;border-radius:50%;background:#667 }.dot.online { background:var(--ok);box-shadow:0 0 14px var(--ok) }
-    table { width:100%;border-collapse:collapse } th,td { text-align:left;padding:10px 8px;border-bottom:1px solid #1d2736 } th { color:var(--muted);font-size:11px;text-transform:uppercase }
-    .teams { display:flex; gap:12px;margin-top:12px }.team { flex:1;padding:13px;border-radius:12px;background:#090d13 }.z { color:var(--z) }.h { color:var(--h) }
-    .events { max-height:260px;overflow:auto;padding-left:20px }.events li { margin:8px 0;color:#c8d2e1 } canvas { max-height:300px }
-    @media(max-width:800px){.card,.wide,.side{grid-column:span 12} header{align-items:start;flex-direction:column;gap:10px}}
+    :root {
+      color-scheme: dark;
+      --bg: #070a0f;
+      --panel: #101722;
+      --panel-2: #0c1119;
+      --line: #202c3f;
+      --text: #e9eff8;
+      --muted: #8fa0b8;
+      --z: #ff4d5e;
+      --h: #4ba3ff;
+      --ok: #48d597;
+      --warn: #f5b041;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at 12% 0%, rgba(28, 45, 75, 0.55) 0, transparent 36%),
+        radial-gradient(circle at 90% 10%, rgba(255, 77, 94, 0.1) 0, transparent 30%),
+        var(--bg);
+      color: var(--text);
+      font: 14px/1.45 Inter, system-ui, -apple-system, sans-serif;
+    }
+    header, main { width: min(1240px, calc(100% - 32px)); margin: auto; }
+    header {
+      padding: 26px 0 18px;
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-end;
+      gap: 14px;
+    }
+    h1 { margin: 2px 0 0; font-size: clamp(24px, 3.6vw, 38px); letter-spacing: -.04em; }
+    h2 { margin: 0 0 10px; font-size: 16px; font-weight: 650; }
+    .eyebrow { color: var(--ok); text-transform: uppercase; letter-spacing: .18em; font-size: 11px; font-weight: 700; }
+    .header-actions { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+    .status {
+      display: inline-flex;
+      gap: 8px;
+      align-items: center;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      padding: 7px 12px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #667; }
+    .dot.online { background: var(--ok); box-shadow: 0 0 12px var(--ok); }
+    .btn {
+      background: #162131;
+      color: var(--text);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 7px 12px;
+      font: inherit;
+      font-size: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: border-color .15s, background .15s;
+    }
+    .btn:hover { border-color: #3a4f70; background: #1c2a3d; }
+    .btn.active { background: rgba(75, 163, 255, .18); border-color: var(--h); color: #bfe0ff; }
+    .grid { display: grid; grid-template-columns: repeat(12, 1fr); gap: 14px; padding-bottom: 40px; }
+    .card {
+      grid-column: span 3;
+      background: linear-gradient(155deg, #131c29, #0c1118);
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 18px;
+      box-shadow: 0 14px 40px #0006;
+    }
+    .wide { grid-column: span 8; }
+    .side { grid-column: span 4; }
+    .half { grid-column: span 6; }
+    .metric { font-size: 28px; font-weight: 750; margin-top: 6px; letter-spacing: -.02em; }
+    .sub { color: var(--muted); font-size: 12px; margin-top: 4px; }
+    .muted { color: var(--muted); }
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 600;
+      background: #192435;
+      color: var(--muted);
+    }
+    .badge.ok { background: rgba(72, 213, 151, .14); color: var(--ok); }
+    .badge.warn { background: rgba(245, 176, 65, .15); color: var(--warn); }
+    .badge.danger { background: rgba(255, 77, 94, .16); color: var(--z); }
+    .badge.info { background: rgba(75, 163, 255, .15); color: var(--h); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { text-align: left; padding: 9px 8px; border-bottom: 1px solid #1a2434; }
+    th { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .04em; }
+    .link-btn {
+      background: none;
+      border: 0;
+      padding: 0;
+      color: #d8e7ff;
+      font: inherit;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: underline dotted #41597d;
+    }
+    .link-btn:hover { color: var(--h); }
+    .teams { display: flex; gap: 10px; margin-top: 10px; }
+    .team { flex: 1; padding: 12px; border-radius: 12px; background: var(--panel-2); border: 1px solid #192232; }
+    .z { color: var(--z); }
+    .h { color: var(--h); }
+    .events { max-height: 280px; overflow: auto; padding-left: 18px; margin: 8px 0 0; }
+    .events li { margin: 7px 0; color: #c8d2e1; font-size: 13px; }
+    .row-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; }
+    .tabs { display: flex; gap: 6px; flex-wrap: wrap; }
+    .weapons { margin-top: 14px; display: flex; flex-direction: column; gap: 8px; }
+    .weapon-row { display: grid; grid-template-columns: 96px 1fr 34px; align-items: center; gap: 8px; font-size: 12px; }
+    .bar-bg { height: 8px; border-radius: 999px; background: #192232; overflow: hidden; }
+    .bar-fill { height: 100%; border-radius: 999px; background: linear-gradient(90deg, var(--z), var(--warn)); }
+    .radar-wrap {
+      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #090d14;
+      border: 1px solid #1c2636;
+      border-radius: 12px;
+      padding: 10px;
+      min-height: 310px;
+    }
+    #radarCanvas { max-width: 100%; max-height: 330px; border-radius: 8px; }
+    #history { width: 100%; display: block; max-height: 260px; }
+    .modal-backdrop {
+      position: fixed; inset: 0; background: rgba(4, 7, 12, .8);
+      backdrop-filter: blur(4px);
+      display: none; align-items: center; justify-content: center; padding: 18px; z-index: 50;
+    }
+    .modal-backdrop.open { display: flex; }
+    .modal {
+      width: min(680px, 100%);
+      max-height: 90vh;
+      overflow: auto;
+      background: #101723;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      padding: 20px;
+      box-shadow: 0 24px 70px #000a;
+    }
+    .modal.wide-modal { width: min(920px, 100%); }
+    .profile-head { display: flex; gap: 14px; align-items: center; margin-bottom: 14px; }
+    .avatar { width: 64px; height: 64px; border-radius: 14px; background: #1a2435; object-fit: cover; border: 1px solid var(--line); }
+    .kv-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 12px; }
+    .kv { background: var(--panel-2); border: 1px solid #1b2536; border-radius: 12px; padding: 10px 12px; }
+    @media (max-width: 900px) {
+      .card, .wide, .side, .half { grid-column: span 12; }
+      header { align-items: flex-start; flex-direction: column; }
+      .kv-grid { grid-template-columns: 1fr; }
+    }
   </style>
 </head>
 <body>
   <header>
-    <div><div class="eyebrow">server-do-junin · zombie plague</div><h1>ZP Command Center</h1></div>
-    <div class="status"><span id="dot" class="dot"></span><span id="status">conectando…</span></div>
+    <div>
+      <div class="eyebrow">server-do-junin · zombie plague</div>
+      <h1>ZP Command Center</h1>
+    </div>
+    <div class="header-actions">
+      <button class="btn" id="openSummaryBtn">🖼️ Card MVP do Dia</button>
+      <div class="status">
+        <span id="dot" class="dot"></span>
+        <span id="status">conectando…</span>
+      </div>
+    </div>
   </header>
+
   <main class="grid">
-    <section class="card"><div class="muted">Mapa</div><div class="metric" id="map">—</div><div class="muted" id="hostname">—</div></section>
-    <section class="card"><div class="muted">Jogadores reais</div><div class="metric" id="players">—</div><div class="muted" id="bots">—</div></section>
-    <section class="card"><div class="muted">Ping</div><div class="metric" id="ping">—</div><div class="muted">A2S UDP</div></section>
-    <section class="card"><div class="muted">Engine FPS</div><div class="metric" id="fps">—</div><div class="muted" id="rcon">RCON aguardando</div></section>
-    <section class="card wide">
-      <h2>Atividade em tempo real</h2><canvas id="history"></canvas>
+    <section class="card">
+      <div class="muted">Mapa atual</div>
+      <div class="metric" id="map">—</div>
+      <div class="sub" id="hostname">—</div>
+      <div class="sub" id="rtvInfo"></div>
     </section>
+
+    <section class="card">
+      <div class="muted">Jogadores reais</div>
+      <div class="metric" id="players">—</div>
+      <div class="sub" id="bots">—</div>
+    </section>
+
+    <section class="card">
+      <div class="muted">Combate hoje</div>
+      <div class="metric" id="killsToday">—</div>
+      <div class="sub" id="combatSub">Pico: — · Ping: —</div>
+    </section>
+
+    <section class="card">
+      <div class="muted">Engine FPS</div>
+      <div class="metric" id="fps">—</div>
+      <div class="sub" id="rcon">RCON aguardando</div>
+    </section>
+
+    <section class="card wide">
+      <div class="row-head">
+        <h2>Atividade em tempo real</h2>
+        <span class="badge" id="sourceBadge">A2S</span>
+      </div>
+      <canvas id="history"></canvas>
+    </section>
+
     <section class="card side">
-      <h2 id="mode">Round</h2><div class="muted" id="round">telemetria aguardando</div>
-      <div class="teams"><div class="team"><b class="z">Zumbis</b><div class="metric" id="zombies">0</div></div><div class="team"><b class="h">Humanos</b><div class="metric" id="humans">0</div></div></div>
+      <div class="row-head">
+        <h2 id="mode">Round</h2>
+        <span class="badge info" id="roundPhase">—</span>
+      </div>
+      <div class="sub" id="round">telemetria aguardando</div>
+      <div class="teams">
+        <div class="team"><b class="z">Zumbis</b><div class="metric" id="zombies">0</div></div>
+        <div class="team"><b class="h">Humanos</b><div class="metric" id="humans">0</div></div>
+      </div>
+      <div class="weapons" id="weaponsBox"></div>
     </section>
-    <section class="card wide">
-      <h2>Jogadores online</h2>
-      <table><thead><tr><th>Nome</th><th>Score</th><th>Tempo</th><th>Ping</th></tr></thead><tbody id="playerRows"><tr><td colspan="4" class="muted">Sem dados</td></tr></tbody></table>
+
+    <section class="card half">
+      <div class="row-head">
+        <h2>Radar & Heatmap</h2>
+        <div class="tabs">
+          <button class="btn active" id="modeRadarBtn">📡 Radar</button>
+          <button class="btn" id="modeHeatBtn">🔥 Heatmap</button>
+        </div>
+      </div>
+      <div class="radar-wrap">
+        <canvas id="radarCanvas" width="480" height="360"></canvas>
+      </div>
+      <div class="sub" id="radarStatus">Aguardando posições ou kills com coordenadas…</div>
     </section>
-    <section class="card side"><h2>Eventos ZP</h2><ol class="events" id="events"><li class="muted">Aguardando plugin de telemetria</li></ol></section>
-    <section class="card wide">
-      <h2>Hoje</h2>
-      <table><thead><tr><th>Nome</th><th>Entrada</th><th>Duração</th></tr></thead><tbody id="todayRows"><tr><td colspan="3" class="muted">Carregando…</td></tr></tbody></table>
-      <div class="muted" style="margin-top:12px">Ranking 7 dias</div>
-      <ol id="todayRanking" class="events"><li class="muted">Carregando…</li></ol>
-      <div class="muted" style="margin-top:12px" id="todayPeak">Recorde: —</div>
+
+    <section class="card half">
+      <div class="row-head">
+        <h2>Eventos ZP</h2>
+        <span class="sub" id="pingBadge">Ping: —</span>
+      </div>
+      <ol class="events" id="events"><li class="muted">Aguardando plugin de telemetria</li></ol>
+    </section>
+
+    <section class="card half">
+      <div class="row-head">
+        <h2>Jogadores online</h2>
+        <span class="sub">Clique no jogador para inspecionar</span>
+      </div>
+      <table>
+        <thead><tr><th>Nome</th><th>Score</th><th>Tempo</th><th>Ping</th></tr></thead>
+        <tbody id="playerRows"><tr><td colspan="4" class="muted">Sem dados</td></tr></tbody>
+      </table>
+    </section>
+
+    <section class="card half">
+      <div class="row-head">
+        <h2>Comunidade & Auditoria</h2>
+        <div class="tabs">
+          <button class="btn active" data-tab="sessions">📅 Hoje</button>
+          <button class="btn" data-tab="fraggers">🥇 Top Dia</button>
+          <button class="btn" data-tab="ranking">🏆 7 Dias</button>
+          <button class="btn" data-tab="audit">🛡️ Auditoria</button>
+        </div>
+      </div>
+      <div id="tab-sessions">
+        <table>
+          <thead><tr><th>Jogador</th><th>Entrada</th><th>Duração</th></tr></thead>
+          <tbody id="todayRows"><tr><td colspan="3" class="muted">Carregando…</td></tr></tbody>
+        </table>
+      </div>
+      <div id="tab-fraggers" style="display:none">
+        <ol id="todayFraggers" class="events"><li class="muted">Sem frags hoje</li></ol>
+      </div>
+      <div id="tab-ranking" style="display:none">
+        <ol id="todayRanking" class="events"><li class="muted">Carregando…</li></ol>
+        <div class="sub" style="margin-top:10px" id="todayPeak">Recorde: —</div>
+      </div>
+      <div id="tab-audit" style="display:none">
+        <ol id="auditRows" class="events"><li class="muted">Carregando…</li></ol>
+      </div>
     </section>
   </main>
+
+  <div class="modal-backdrop" id="playerModal">
+    <div class="modal">
+      <div class="row-head">
+        <h2>Perfil & Confiança do Jogador</h2>
+        <button class="btn" onclick="closeModal('playerModal')">Fechar</button>
+      </div>
+      <div id="playerModalBody" class="muted">Carregando…</div>
+    </div>
+  </div>
+
+  <div class="modal-backdrop" id="summaryModal">
+    <div class="modal wide-modal">
+      <div class="row-head">
+        <h2>Resumo Diário / MVP</h2>
+        <div class="tabs">
+          <a class="btn" id="downloadSummaryLink" href="/api/summary.png" download="zp-resumo.png">⬇️ Baixar PNG</a>
+          <button class="btn" onclick="closeModal('summaryModal')">Fechar</button>
+        </div>
+      </div>
+      <img id="summaryImg" alt="Card MVP do Dia" style="width:100%;border-radius:12px;border:1px solid var(--line)" />
+    </div>
+  </div>
+
   <script>
-    const el=id=>document.getElementById(id); let chart;
-    const duration=s=>s==null?'—':`${Math.floor(s/60)}m ${Math.round(s%60)}s`;
-    function render(s){
-      el('dot').classList.toggle('online',s.connection.online); el('status').textContent=s.connection.online?'online':`offline · ${s.connection.lastError||'sem resposta'}`;
-      if(s.info){el('map').textContent=s.info.map;el('hostname').textContent=s.info.name;el('players').textContent=`${s.info.players}/${s.info.maxplayers}`;el('bots').textContent=`${s.info.bots} bots`;el('ping').textContent=s.info.ping==null?'—':`${s.info.ping} ms`}
-      el('fps').textContent=s.rcon.fps==null?'—':s.rcon.fps.toFixed(1);el('rcon').textContent=s.rcon.lastError||'RCON ativo';
-      const t=s.telemetry;el('mode').textContent=t.round?.mode||'Round';el('round').textContent=t.connected?`${t.round?.phase||'—'} · ${duration(t.round?.elapsed)} / ${duration(t.round?.timeLimit)}`:(t.lastError||'telemetria aguardando');el('zombies').textContent=t.zombies;el('humans').textContent=t.humans;
-      el('playerRows').innerHTML=s.players.length?s.players.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${p.score}</td><td>${duration(p.time)}</td><td>${p.ping==null?'—':p.ping+' ms'}</td></tr>`).join(''):'<tr><td colspan="4" class="muted">Servidor vazio</td></tr>';
-      el('events').innerHTML=t.events.length?t.events.map(e=>`<li>${escapeHtml(e.message)}</li>`).join(''):'<li class="muted">Sem eventos recentes</li>';
-      const data={labels:s.history.t.map(v=>new Date(v).toLocaleTimeString()),datasets:[{label:'Jogadores',data:s.history.players,borderColor:'#e8eef8',pointRadius:0,tension:.25},{label:'Zumbis',data:s.history.zombies,borderColor:'#ff4d5e',pointRadius:0,tension:.25},{label:'Humanos',data:s.history.humans,borderColor:'#4ba3ff',pointRadius:0,tension:.25}]};
-      if(!chart)chart=new Chart(el('history'),{type:'line',data,options:{animation:false,responsive:true,plugins:{legend:{labels:{color:'#8fa0b8'}}},scales:{x:{ticks:{color:'#66758c',maxTicksLimit:8}},y:{beginAtZero:true,ticks:{color:'#66758c'}}}}});else{chart.data=data;chart.update('none')}
+    const el = id => document.getElementById(id);
+    let chart;
+    let lastState = null;
+    let radarMode = 'radar';
+    let mapMetaCache = { map: '', meta: null, img: null };
+
+    const duration = s => s == null ? '—' : `${Math.floor(s / 60)}m ${Math.round(s % 60)}s`;
+    function escapeHtml(v) { const d = document.createElement('div'); d.textContent = String(v ?? ''); return d.innerHTML; }
+    function flagEmoji(code) {
+      if (!code || !/^[A-Z]{2}$/.test(code)) return '';
+      return String.fromCodePoint(0x1f1e6 + code.charCodeAt(0) - 65, 0x1f1e6 + code.charCodeAt(1) - 65) + ' ';
     }
-    function escapeHtml(v){const d=document.createElement('div');d.textContent=v;return d.innerHTML}
-    function renderToday(d){
-      el('todayRows').innerHTML=d.players.length?d.players.map(p=>`<tr><td>${escapeHtml(p.name)}</td><td>${new Date(p.connectedAt).toLocaleTimeString('pt-BR')}</td><td>${duration(p.durationSeconds)}</td></tr>`).join(''):'<tr><td colspan="3" class="muted">Ninguém entrou hoje</td></tr>';
-      el('todayRanking').innerHTML=d.ranking.length?d.ranking.map(r=>`<li>${escapeHtml(r.name)} — ${r.kills} frags</li>`).join(''):'<li class="muted">Sem frags nos últimos 7 dias</li>';
-      el('todayPeak').textContent=d.peak?`Recorde: ${d.peak.humans} humanos em ${new Date(d.peak.at).toLocaleString('pt-BR')}`:'Recorde: sem dados';
+
+    function openModal(id) { el(id).classList.add('open'); }
+    function closeModal(id) { el(id).classList.remove('open'); }
+
+    el('openSummaryBtn').onclick = () => {
+      el('summaryImg').src = `/api/summary.png?t=${Date.now()}`;
+      openModal('summaryModal');
+    };
+
+    el('modeRadarBtn').onclick = () => {
+      radarMode = 'radar';
+      el('modeRadarBtn').classList.add('active');
+      el('modeHeatBtn').classList.remove('active');
+      drawSpatial();
+    };
+    el('modeHeatBtn').onclick = () => {
+      radarMode = 'heatmap';
+      el('modeHeatBtn').classList.add('active');
+      el('modeRadarBtn').classList.remove('active');
+      drawSpatial();
+    };
+
+    document.querySelectorAll('[data-tab]').forEach(btn => {
+      btn.onclick = () => {
+        document.querySelectorAll('[data-tab]').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        const tab = btn.dataset.tab;
+        ['sessions', 'fraggers', 'ranking', 'audit'].forEach(t => {
+          el(`tab-${t}`).style.display = t === tab ? 'block' : 'none';
+        });
+        if (tab === 'audit') loadAudit();
+      };
+    });
+
+    async function ensureMapMeta(map) {
+      if (!map) return null;
+      if (mapMetaCache.map === map && mapMetaCache.meta) return mapMetaCache;
+      try {
+        const meta = await fetch(`/api/map/meta/${encodeURIComponent(map)}`).then(r => r.json());
+        let img = null;
+        if (meta.available && meta.imageUrl) {
+          img = await new Promise(resolve => {
+            const im = new Image();
+            im.onload = () => resolve(im);
+            im.onerror = () => resolve(null);
+            im.src = meta.imageUrl;
+          });
+        }
+        mapMetaCache = { map, meta, img };
+        return mapMetaCache;
+      } catch {
+        return null;
+      }
     }
-    function loadToday(){fetch('/api/today').then(r=>r.json()).then(renderToday).catch(()=>{})}
-    fetch('/api/state').then(r=>r.json()).then(render);
+
+    function projectOverview(overview, wx, wy, w, h) {
+      if (!overview) return null;
+      let u, v;
+      if (overview.kind === 'source') {
+        u = (wx - overview.posX) / overview.scale / w;
+        v = (overview.posY - wy) / overview.scale / h;
+      } else {
+        const hx = 4096 / overview.zoom;
+        const hy = 4096 / (overview.zoom * (4 / 3));
+        if (overview.rotated) {
+          u = (wx - overview.originX + hx) / (2 * hx);
+          v = (overview.originY + hy - wy) / (2 * hy);
+        } else {
+          u = (overview.originY + hx - wy) / (2 * hx);
+          v = (overview.originX + hy - wx) / (2 * hy);
+        }
+      }
+      if (!(u >= 0 && u < 1 && v >= 0 && v < 1)) return null;
+      return [u * w, v * h];
+    }
+
+    async function drawSpatial() {
+      const canvas = el('radarCanvas');
+      const ctx = canvas.getContext('2d');
+      const map = lastState?.info?.map || '';
+      const entry = await ensureMapMeta(map);
+      const meta = entry?.meta;
+      const bgImg = entry?.img;
+
+      const w = bgImg ? meta.width : 480;
+      const h = bgImg ? meta.height : 360;
+      if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+
+      if (bgImg) {
+        ctx.drawImage(bgImg, 0, 0, w, h);
+      } else {
+        ctx.fillStyle = '#090e15';
+        ctx.fillRect(0, 0, w, h);
+        ctx.strokeStyle = '#182233';
+        ctx.lineWidth = 1;
+        for (let i = 1; i < 8; i++) {
+          ctx.beginPath(); ctx.moveTo((w / 8) * i, 0); ctx.lineTo((w / 8) * i, h); ctx.stroke();
+          ctx.beginPath(); ctx.moveTo(0, (h / 8) * i); ctx.lineTo(w, (h / 8) * i); ctx.stroke();
+        }
+      }
+
+      const radarPlayers = lastState?.radar?.players || [];
+      const heatPoints = meta?.heatmap || [];
+      const items = radarMode === 'radar' ? radarPlayers : heatPoints;
+
+      let project;
+      if (bgImg && meta?.overview) {
+        project = (x, y) => projectOverview(meta.overview, x, y, w, h);
+      } else if (items.length > 0) {
+        const xs = items.map(p => p.x), ys = items.map(p => p.y);
+        const minX = Math.min(...xs), maxX = Math.max(...xs);
+        const minY = Math.min(...ys), maxY = Math.max(...ys);
+        const rx = Math.max(200, maxX - minX), ry = Math.max(200, maxY - minY);
+        const cx = (minX + maxX) / 2, cy = (minY + maxY) / 2;
+        const pad = 32;
+        project = (x, y) => [
+          pad + ((x - (cx - rx / 2)) / rx) * (w - 2 * pad),
+          h - (pad + ((y - (cy - ry / 2)) / ry) * (h - 2 * pad)),
+        ];
+      } else {
+        project = () => null;
+      }
+
+      if (radarMode === 'heatmap') {
+        ctx.globalCompositeOperation = 'lighter';
+        const rad = Math.max(14, Math.round(Math.min(w, h) / 28));
+        for (const pt of heatPoints) {
+          const pos = project(pt.x, pt.y);
+          if (!pos) continue;
+          const g = ctx.createRadialGradient(pos[0], pos[1], 1, pos[0], pos[1], rad);
+          g.addColorStop(0, 'rgba(255, 77, 94, 0.42)');
+          g.addColorStop(0.5, 'rgba(245, 176, 65, 0.2)');
+          g.addColorStop(1, 'rgba(245, 176, 65, 0)');
+          ctx.fillStyle = g;
+          ctx.beginPath(); ctx.arc(pos[0], pos[1], rad, 0, Math.PI * 2); ctx.fill();
+        }
+        ctx.globalCompositeOperation = 'source-over';
+        el('radarStatus').textContent = heatPoints.length
+          ? `${heatPoints.length} eliminações registradas em ${map || 'mapa atual'} (últimos 14 dias)`
+          : `Sem kills com coordenadas registradas para ${map || 'este mapa'} ainda.`;
+        return;
+      }
+
+      for (const p of radarPlayers) {
+        const pos = project(p.x, p.y);
+        if (!pos) continue;
+        const [px, py] = pos;
+        const isZ = p.team === 'z';
+        const color = isZ ? '#ff4d5e' : '#4ba3ff';
+        const rad = (p.angle * Math.PI) / 180;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(px + Math.cos(rad) * 14, py - Math.sin(rad) * 14); ctx.stroke();
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        if (isZ) {
+          ctx.moveTo(px, py - 6); ctx.lineTo(px + 6, py + 6); ctx.lineTo(px - 6, py + 6); ctx.closePath();
+        } else {
+          ctx.arc(px, py, 5.5, 0, Math.PI * 2);
+        }
+        ctx.fill();
+      }
+      el('radarStatus').textContent = radarPlayers.length
+        ? `Ao vivo: ${radarPlayers.length} marcadores em ${map || 'mapa'} (${bgImg ? 'overview calibrado' : 'grade automática'})`
+        : 'Aguardando telemetria de posições do servidor…';
+    }
+
+    async function inspectPlayer(steamId) {
+      if (!steamId) return;
+      el('playerModalBody').innerHTML = '<div class="muted">Consultando perfil, Steam e rivalidades…</div>';
+      openModal('playerModal');
+      try {
+        const d = await fetch(`/api/player/${encodeURIComponent(steamId)}`).then(r => r.json());
+        const trustClass = d.trust.level === 'trusted' ? 'ok' : d.trust.level === 'high_risk' ? 'danger' : d.trust.level === 'watch' ? 'warn' : 'info';
+        const kd = (d.summary.rank7d.kills / Math.max(1, d.summary.rank7d.deaths)).toFixed(2);
+        const avatarHtml = d.avatarUrl ? `<img class="avatar" src="${escapeHtml(d.avatarUrl)}" alt="Avatar">` : `<div class="avatar"></div>`;
+        const profileLink = d.profileUrl ? `<a href="${escapeHtml(d.profileUrl)}" target="_blank" style="color:var(--h)">Abrir perfil na Steam</a>` : `<span class="muted">${escapeHtml(d.origin)}</span>`;
+        el('playerModalBody').innerHTML = `
+          <div class="profile-head">
+            ${avatarHtml}
+            <div>
+              <div style="font-size:18px;font-weight:700">${flagEmoji(d.summary.countryCode)}${escapeHtml(d.summary.latestName || d.profileName || d.steamId)}</div>
+              <div class="sub"><code>${escapeHtml(d.steamId)}</code> · ${profileLink}</div>
+              <div style="margin-top:6px"><span class="badge ${trustClass}">Trust ${d.trust.score}/100 · ${escapeHtml(d.trust.level)}</span></div>
+            </div>
+          </div>
+          ${d.trust.reasons.length ? `<div class="sub">Sinais: ${d.trust.reasons.map(escapeHtml).join(' · ')}</div>` : ''}
+          <div class="kv-grid">
+            <div class="kv"><div class="muted">Visitas & Tempo</div><div><b>${d.summary.visits}</b> visitas · ${duration(d.summary.totalSeconds)}</div></div>
+            <div class="kv"><div class="muted">Ranking 7 dias</div><div><b>${d.summary.rank7d.rank ? '#' + d.summary.rank7d.rank : '—'}</b> · ${d.summary.rank7d.kills}K / ${d.summary.rank7d.deaths}D (K/D ${kd})</div></div>
+            <div class="kv"><div class="muted">Maior Freguês (7d)</div><div>${d.summary.rivals7d.fregues ? `${escapeHtml(d.summary.rivals7d.fregues.name)} (${d.summary.rivals7d.fregues.kills}×)` : '—'}</div></div>
+            <div class="kv"><div class="muted">Maior Algoz (7d)</div><div>${d.summary.rivals7d.algoz ? `${escapeHtml(d.summary.rivals7d.algoz.name)} (${d.summary.rivals7d.algoz.deaths}×)` : '—'}</div></div>
+          </div>
+          ${d.summary.previousNames.length ? `<div class="sub" style="margin-top:10px">Nicks anteriores: ${d.summary.previousNames.map(escapeHtml).join(', ')}</div>` : ''}
+          ${d.summary.topWeapons7d.length ? `<div class="sub" style="margin-top:6px">Armas favoritas (7d): ${d.summary.topWeapons7d.map(w => `${escapeHtml(w.weapon)} (${w.kills})`).join(' · ')}</div>` : ''}
+        `;
+      } catch {
+        el('playerModalBody').innerHTML = '<div class="z">Erro ao carregar dados do jogador.</div>';
+      }
+    }
+    window.inspectPlayer = inspectPlayer;
+    window.closeModal = closeModal;
+
+    function render(s) {
+      lastState = s;
+      el('dot').classList.toggle('online', s.connection.online);
+      el('status').textContent = s.connection.online ? 'online' : `offline · ${s.connection.lastError || 'sem resposta'}`;
+      if (s.info) {
+        el('map').textContent = s.info.map;
+        el('hostname').textContent = s.info.name;
+        el('players').textContent = `${s.info.players}/${s.info.maxplayers}`;
+        el('bots').textContent = `${s.info.bots} bots · fonte: ${s.playersSource}`;
+        el('pingBadge').textContent = s.info.ping == null ? 'Ping: —' : `Ping: ${s.info.ping} ms`;
+      }
+      el('fps').textContent = s.rcon.fps == null ? '—' : s.rcon.fps.toFixed(1);
+      el('rcon').textContent = s.rcon.lastError || (s.rcon.supported ? 'RCON ativo' : 'RCON desativado');
+      el('sourceBadge').textContent = s.playersSource === 'status' ? 'RCON status' : 'heurística A2S';
+
+      const t = s.telemetry;
+      el('mode').textContent = t.round?.mode || 'Round';
+      el('roundPhase').textContent = t.connected ? (t.round?.phase || 'ativo') : 'offline';
+      el('round').textContent = t.connected
+        ? `${duration(t.round?.elapsed)} / ${duration(t.round?.timeLimit)}`
+        : (t.lastError || 'telemetria aguardando');
+      el('zombies').textContent = t.zombies;
+      el('humans').textContent = t.humans;
+
+      el('playerRows').innerHTML = s.players.length
+        ? s.players.map(p => {
+            const nameCell = p.steamId
+              ? `<button class="link-btn" onclick="inspectPlayer('${escapeHtml(p.steamId)}')">${escapeHtml(p.name)}</button>`
+              : escapeHtml(p.name);
+            return `<tr><td>${nameCell}</td><td>${p.score}</td><td>${duration(p.time)}</td><td>${p.ping == null ? '—' : p.ping + ' ms'}</td></tr>`;
+          }).join('')
+        : '<tr><td colspan="4" class="muted">Servidor vazio</td></tr>';
+
+      el('events').innerHTML = t.events.length
+        ? t.events.map(e => `<li>${escapeHtml(e.message)}</li>`).join('')
+        : '<li class="muted">Sem eventos recentes</li>';
+
+      const data = {
+        labels: s.history.t.map(v => new Date(v).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })),
+        datasets: [
+          { label: 'Jogadores', data: s.history.players, borderColor: '#e8eef8', pointRadius: 0, tension: .25 },
+          { label: 'Zumbis', data: s.history.zombies, borderColor: '#ff4d5e', pointRadius: 0, tension: .25 },
+          { label: 'Humanos', data: s.history.humans, borderColor: '#4ba3ff', pointRadius: 0, tension: .25 },
+        ],
+      };
+      if (typeof Chart !== 'undefined') {
+        if (!chart) {
+          chart = new Chart(el('history'), {
+            type: 'line',
+            data,
+            options: {
+              animation: false,
+              responsive: true,
+              plugins: { legend: { labels: { color: '#8fa0b8' } } },
+              scales: {
+                x: { ticks: { color: '#66758c', maxTicksLimit: 8 } },
+                y: { beginAtZero: true, ticks: { color: '#66758c' } },
+              },
+            },
+          });
+        } else {
+          chart.data = data;
+          chart.update('none');
+        }
+      } else {
+        drawFallbackChart(el('history'), s.history, data.labels);
+      }
+      void drawSpatial();
+    }
+
+    function drawFallbackChart(canvas, history, labels) {
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width = canvas.clientWidth || 640;
+      const h = canvas.height = 240;
+      ctx.clearRect(0, 0, w, h);
+      const padL = 34, padR = 14, padT = 26, padB = 26;
+      const cw = w - padL - padR;
+      const ch = h - padT - padB;
+      const series = [
+        { label: 'Jogadores', vals: history.players || [], color: '#e8eef8' },
+        { label: 'Zumbis', vals: history.zombies || [], color: '#ff4d5e' },
+        { label: 'Humanos', vals: history.humans || [], color: '#4ba3ff' },
+      ];
+      const maxY = Math.max(4, ...series.flatMap(sr => sr.vals));
+      ctx.strokeStyle = '#182233';
+      ctx.lineWidth = 1;
+      ctx.fillStyle = '#66758c';
+      ctx.font = '11px system-ui, sans-serif';
+      for (let i = 0; i <= 4; i++) {
+        const y = padT + (ch / 4) * i;
+        ctx.beginPath(); ctx.moveTo(padL, y); ctx.lineTo(w - padR, y); ctx.stroke();
+        ctx.fillText(String(Math.round(maxY * (1 - i / 4))), 6, y + 4);
+      }
+      let lx = padL;
+      for (const sr of series) {
+        ctx.fillStyle = sr.color;
+        ctx.fillRect(lx, 8, 12, 3);
+        ctx.fillStyle = '#8fa0b8';
+        ctx.fillText(sr.label, lx + 16, 13);
+        lx += 88;
+        if (!sr.vals.length) continue;
+        ctx.strokeStyle = sr.color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        sr.vals.forEach((v, idx) => {
+          const x = padL + (sr.vals.length === 1 ? cw / 2 : (idx / (sr.vals.length - 1)) * cw);
+          const y = padT + ch - (v / maxY) * ch;
+          if (idx === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+      }
+      if (labels.length >= 2) {
+        ctx.fillStyle = '#66758c';
+        ctx.fillText(labels[0], padL, h - 6);
+        const last = labels[labels.length - 1];
+        ctx.fillText(last, w - padR - ctx.measureText(last).width, h - 6);
+      }
+    }
+
+    function renderToday(d) {
+      const m = d.metrics || { kills: 0, deaths: 0, peakHumans: 0, distinctHumans: 0, chatLines: 0, topFraggers: [], topWeapons: [] };
+      el('killsToday').textContent = `${m.kills} / ${m.deaths}`;
+      el('combatSub').textContent = `Pico hoje: ${m.peakHumans} · Únicos: ${m.distinctHumans} · Chat: ${m.chatLines}`;
+      el('rtvInfo').textContent = d.rtv?.length ? `RTV: ${d.rtv.map(v => `${v.map} (${v.votes})`).join(', ')}` : '';
+
+      const maxW = Math.max(1, m.topWeapons[0]?.[1] || 1);
+      el('weaponsBox').innerHTML = m.topWeapons.length
+        ? `<div class="muted" style="font-size:11px;text-transform:uppercase">Top armas hoje</div>` +
+          m.topWeapons.map(([w, n]) => `
+            <div class="weapon-row">
+              <span>${escapeHtml(w)}</span>
+              <div class="bar-bg"><div class="bar-fill" style="width:${Math.round((n / maxW) * 100)}%"></div></div>
+              <span class="muted">${n}</span>
+            </div>`).join('')
+        : '';
+
+      el('todayRows').innerHTML = d.players.length
+        ? d.players.map(p => `<tr><td>${flagEmoji(p.countryCode)}<button class="link-btn" onclick="inspectPlayer('${escapeHtml(p.steamId)}')">${escapeHtml(p.name)}</button></td><td>${new Date(p.connectedAt).toLocaleTimeString('pt-BR')}</td><td>${duration(p.durationSeconds)}</td></tr>`).join('')
+        : '<tr><td colspan="3" class="muted">Ninguém entrou hoje</td></tr>';
+
+      el('todayFraggers').innerHTML = m.topFraggers.length
+        ? m.topFraggers.map(f => `<li><b>${escapeHtml(f.name)}</b> — ${f.kills} kills / ${f.deaths} mortes</li>`).join('')
+        : '<li class="muted">Sem frags hoje</li>';
+
+      el('todayRanking').innerHTML = d.ranking.length
+        ? d.ranking.map(r => {
+            const label = r.steamId
+              ? `<button class="link-btn" onclick="inspectPlayer('${escapeHtml(r.steamId)}')">${escapeHtml(r.name)}</button>`
+              : escapeHtml(r.name);
+            return `<li>${label} — ${r.kills} frags</li>`;
+          }).join('')
+        : '<li class="muted">Sem frags nos últimos 7 dias</li>';
+
+      el('todayPeak').textContent = d.peak
+        ? `Recorde histórico: ${d.peak.humans} humanos em ${new Date(d.peak.at).toLocaleString('pt-BR')}`
+        : 'Recorde histórico: sem dados';
+    }
+
+    function loadToday() { fetch('/api/today').then(r => r.json()).then(renderToday).catch(() => {}); }
+    function loadAudit() {
+      fetch('/api/audit').then(r => r.json()).then(d => {
+        el('auditRows').innerHTML = d.events?.length
+          ? d.events.map(e => `<li><code>${escapeHtml(e.status)}</code> <b>${escapeHtml(e.actor)}</b> (${escapeHtml(e.action)}): ${escapeHtml(e.request)}</li>`).join('')
+          : '<li class="muted">Sem eventos de auditoria</li>';
+      }).catch(() => {});
+    }
+
+    fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
     loadToday();
-    setInterval(loadToday,60000);
-    function connect(){const ws=new WebSocket(`${location.protocol==='https:'?'wss':'ws'}://${location.host}/ws`);ws.onmessage=e=>{const p=JSON.parse(e.data);if(p.type==='state')render(p.data)};ws.onclose=()=>setTimeout(connect,2000)}connect();
+    setInterval(loadToday, 30000);
+    function connect() {
+      const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
+      ws.onmessage = e => { const p = JSON.parse(e.data); if (p.type === 'state') render(p.data); };
+      ws.onclose = () => setTimeout(connect, 2000);
+    }
+    connect();
   </script>
 </body>
 </html>

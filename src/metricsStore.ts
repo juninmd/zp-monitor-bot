@@ -19,6 +19,20 @@ export interface KillRow {
   victimName: string;
   victimSteamId: string;
   weapon: string;
+  map?: string;
+  killerX?: number | null;
+  killerY?: number | null;
+  killerZ?: number | null;
+  victimX?: number | null;
+  victimY?: number | null;
+  victimZ?: number | null;
+}
+
+export interface HeatmapPoint {
+  x: number;
+  y: number;
+  weapon: string;
+  kind: "victim" | "killer";
 }
 
 export interface DailyTotals {
@@ -31,6 +45,22 @@ export interface DailyTotals {
   weapons: Array<[string, number]>;
 }
 
+const LIVE_HEATMAP_CAP = 500;
+const liveHeatmap = new Map<string, HeatmapPoint[]>();
+
+export function recordLiveHeatmapKill(kill: KillRow): void {
+  const map = kill.map?.trim();
+  if (!map || kill.victimX == null || kill.victimY == null) return;
+  const list = liveHeatmap.get(map) ?? [];
+  list.push({ x: kill.victimX, y: kill.victimY, weapon: kill.weapon, kind: "victim" });
+  if (list.length > LIVE_HEATMAP_CAP) list.splice(0, list.length - LIVE_HEATMAP_CAP);
+  liveHeatmap.set(map, list);
+}
+
+export function getLiveHeatmap(map: string): HeatmapPoint[] {
+  return liveHeatmap.get(map) ?? [];
+}
+
 export async function initializeMetricsTables(): Promise<void> {
   if (!database) return;
   await database`
@@ -41,10 +71,25 @@ export async function initializeMetricsTables(): Promise<void> {
       victim_steam_id text NOT NULL,
       victim_name text NOT NULL,
       weapon text NOT NULL,
+      map text,
+      killer_x integer,
+      killer_y integer,
+      killer_z integer,
+      victim_x integer,
+      victim_y integer,
+      victim_z integer,
       created_at timestamptz NOT NULL DEFAULT now()
     )
   `;
+  await database`ALTER TABLE kill_events ADD COLUMN IF NOT EXISTS map text`;
+  await database`ALTER TABLE kill_events ADD COLUMN IF NOT EXISTS killer_x integer`;
+  await database`ALTER TABLE kill_events ADD COLUMN IF NOT EXISTS killer_y integer`;
+  await database`ALTER TABLE kill_events ADD COLUMN IF NOT EXISTS killer_z integer`;
+  await database`ALTER TABLE kill_events ADD COLUMN IF NOT EXISTS victim_x integer`;
+  await database`ALTER TABLE kill_events ADD COLUMN IF NOT EXISTS victim_y integer`;
+  await database`ALTER TABLE kill_events ADD COLUMN IF NOT EXISTS victim_z integer`;
   await database`CREATE INDEX IF NOT EXISTS kill_events_created_at_idx ON kill_events (created_at DESC)`;
+  await database`CREATE INDEX IF NOT EXISTS kill_events_map_idx ON kill_events (map, created_at DESC)`;
   // Amostra de presença: 1/min é o suficiente para pico, horário nobre e
   // retenção, sem inflar a tabela como o polling de 3s faria.
   await database`
@@ -69,13 +114,23 @@ async function flush(): Promise<void> {
   pending = [];
   try {
     await database`
-      INSERT INTO kill_events (killer_steam_id, killer_name, victim_steam_id, victim_name, weapon)
+      INSERT INTO kill_events (
+        killer_steam_id, killer_name, victim_steam_id, victim_name, weapon,
+        map, killer_x, killer_y, killer_z, victim_x, victim_y, victim_z
+      )
       SELECT * FROM UNNEST(
         ${batch.map((k) => k.killerSteamId)}::text[],
         ${batch.map((k) => k.killerName)}::text[],
         ${batch.map((k) => k.victimSteamId)}::text[],
         ${batch.map((k) => k.victimName)}::text[],
-        ${batch.map((k) => k.weapon)}::text[]
+        ${batch.map((k) => k.weapon)}::text[],
+        ${batch.map((k) => k.map ?? null)}::text[],
+        ${batch.map((k) => k.killerX ?? null)}::integer[],
+        ${batch.map((k) => k.killerY ?? null)}::integer[],
+        ${batch.map((k) => k.killerZ ?? null)}::integer[],
+        ${batch.map((k) => k.victimX ?? null)}::integer[],
+        ${batch.map((k) => k.victimY ?? null)}::integer[],
+        ${batch.map((k) => k.victimZ ?? null)}::integer[]
       )
     `;
   } catch (error) {
@@ -83,8 +138,9 @@ async function flush(): Promise<void> {
   }
 }
 
-/** Enfileira uma kill entre humanos. Sem banco, vira no-op. */
+/** Enfileira uma kill entre humanos. Sem banco, guarda apenas no heatmap vivo. */
 export function enqueueKill(kill: KillRow): void {
+  recordLiveHeatmapKill(kill);
   if (!database) return;
   pending.push(kill);
   if (pending.length >= FLUSH_MAX_ROWS) {

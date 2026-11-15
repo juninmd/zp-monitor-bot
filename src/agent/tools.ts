@@ -1,6 +1,7 @@
 import { FunctionTool } from "@google/adk";
 import { z } from "zod";
 import { config } from "../config";
+import { type AuditEvent, auditEvent } from "../database";
 import { runRconCommand } from "../rcon";
 import { escapeHtml, type sendTelegram } from "../telegram";
 import { remainingMin, tryConsume } from "./cooldowns";
@@ -23,6 +24,7 @@ interface PlayerToolDependencies {
   notify: typeof sendTelegram;
   consume: typeof tryConsume;
   cooldownRemaining: typeof remainingMin;
+  audit?: (event: AuditEvent) => Promise<void>;
 }
 
 const productionDependencies: PlayerToolDependencies = {
@@ -31,6 +33,7 @@ const productionDependencies: PlayerToolDependencies = {
   notify: (text) => console.info("[agent]", text),
   consume: tryConsume,
   cooldownRemaining: remainingMin,
+  audit: auditEvent,
 };
 
 /** Builds the allowlisted admin tools, bound to the player who is chatting. */
@@ -42,6 +45,15 @@ export function buildToolsForPlayer(
   // than uid against a stale/duplicated slot, and avoids letting the LLM name
   // an arbitrary other player (only this sender's own name is ever used).
   const safeName = player.name.replace(/["\n;]/g, "").slice(0, 32);
+  const recordAudit = (request: string, response: string, status: AuditEvent["status"]) =>
+    dependencies.audit?.({
+      chatId: "ingame:chat",
+      actor: `${player.name} (${player.steamId})`,
+      action: "command",
+      request,
+      response,
+      status,
+    }) ?? Promise.resolve();
 
   const respawnPlayer = new FunctionTool({
     name: "respawn_player",
@@ -55,7 +67,9 @@ export function buildToolsForPlayer(
           reason: `cooldown, tente de novo em ${dependencies.cooldownRemaining(key, config.agentRespawnCooldownMin)} min`,
         };
       }
-      const out = await dependencies.runRcon(`zp_respawn "${safeName}"`);
+      const cmd = `zp_respawn "${safeName}"`;
+      const out = await dependencies.runRcon(cmd);
+      await recordAudit(cmd, out.trim().slice(0, 200), "success").catch(() => {});
       dependencies.notify(
         `🤖 IA respawnou <b>${escapeHtml(player.name)}</b> a pedido dele no chat.`,
       );
@@ -84,7 +98,9 @@ export function buildToolsForPlayer(
         };
       }
       const clamped = Math.min(Math.max(1, Math.round(amount)), config.agentAmmoMaxAmount);
-      const out = await dependencies.runRcon(`zp_give_ammo "${safeName}" ${clamped}`);
+      const cmd = `zp_give_ammo "${safeName}" ${clamped}`;
+      const out = await dependencies.runRcon(cmd);
+      await recordAudit(cmd, out.trim().slice(0, 200), "success").catch(() => {});
       dependencies.notify(
         `🤖 IA deu <b>${clamped} AP</b> para <b>${escapeHtml(player.name)}</b> a pedido dele no chat.`,
       );
@@ -104,7 +120,9 @@ export function buildToolsForPlayer(
           reason: `cooldown, tente de novo em ${dependencies.cooldownRemaining(key, config.agentRespawnCooldownMin)} min`,
         };
       }
-      const out = await dependencies.runRcon(`amx_slap "${safeName}" 0`);
+      const cmd = `amx_slap "${safeName}" 0`;
+      const out = await dependencies.runRcon(cmd);
+      await recordAudit(cmd, out.trim().slice(0, 200), "success").catch(() => {});
       dependencies.notify(
         `🤖 IA deu um "slap" (destravar) em <b>${escapeHtml(player.name)}</b> a pedido dele no chat.`,
       );
@@ -131,7 +149,9 @@ export function buildToolsForPlayer(
       if (safeMap.length < 3) {
         return { ok: false, reason: "nome de mapa inválido" };
       }
-      const out = await dependencies.runRcon(`changelevel ${safeMap}`);
+      const cmd = `changelevel ${safeMap}`;
+      const out = await dependencies.runRcon(cmd);
+      await recordAudit(cmd, out.trim().slice(0, 200), "success").catch(() => {});
       dependencies.notify(
         `🤖 IA trocou o mapa para <b>${escapeHtml(safeMap)}</b> a pedido de <b>${escapeHtml(player.name)}</b> no chat.`,
       );

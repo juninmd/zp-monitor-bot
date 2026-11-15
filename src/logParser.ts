@@ -1,3 +1,9 @@
+export interface LogPos {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export type LogEvent =
   | { type: "connect"; name: string; uid: string; steamId: string; ip: string }
   | { type: "validated"; name: string; uid: string; steamId: string }
@@ -14,8 +20,8 @@ export type LogEvent =
     }
   | {
       type: "kill";
-      killer: { name: string; uid: string; steamId: string; team: string };
-      victim: { name: string; uid: string; steamId: string; team: string };
+      killer: { name: string; uid: string; steamId: string; team: string; pos?: LogPos };
+      victim: { name: string; uid: string; steamId: string; team: string; pos?: LogPos };
       weapon: string;
     };
 
@@ -27,7 +33,7 @@ const DISCONNECT_RE =
 const SAY_RE = /"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" (say|say_team) "(.*)"/;
 // "Fulano<7><STEAM_0:0:123><CT>" [-258 1340 18] killed "Cicrano<8><STEAM_0:0:456><T>" [100 200 30] with "knife"
 const KILL_RE =
-  /^"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*-?\d+\s+-?\d+\s+-?\d+\s*\] killed "(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*-?\d+\s+-?\d+\s+-?\d+\s*\] with "([^"]*)"/;
+  /^"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\] killed "(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\] with "([^"]*)"/;
 
 export function parseLine(line: string): LogEvent | null {
   let m = line.match(CONNECT_RE);
@@ -91,14 +97,16 @@ export function parseLine(line: string): LogEvent | null {
         uid: m[2] ?? "",
         steamId: m[3] ?? "",
         team: m[4] ?? "",
+        pos: { x: Number(m[5]), y: Number(m[6]), z: Number(m[7]) },
       },
       victim: {
-        name: m[5] ?? "",
-        uid: m[6] ?? "",
-        steamId: m[7] ?? "",
-        team: m[8] ?? "",
+        name: m[8] ?? "",
+        uid: m[9] ?? "",
+        steamId: m[10] ?? "",
+        team: m[11] ?? "",
+        pos: { x: Number(m[12]), y: Number(m[13]), z: Number(m[14]) },
       },
-      weapon: m[9] ?? "",
+      weapon: m[15] ?? "",
     };
 
   return null;

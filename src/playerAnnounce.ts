@@ -14,7 +14,9 @@ import { type PlayerHistory, recordConnect, UNKNOWN_HISTORY } from "./playerStor
 import { getStats } from "./state";
 import { describeSteamId, formatDuration } from "./steamId";
 import { countryFlag, getSteamProfile, type SteamProfile } from "./steamProfile";
+import { getSteamSignals } from "./steamSignals";
 import { escapeHtml, sendTelegram, sendTelegramPhotoTo } from "./telegram";
+import { evaluateTrust, shouldSendTrustAlert } from "./trustScore";
 
 const BR_TIME = new Intl.DateTimeFormat("pt-BR", {
   timeZone: "America/Sao_Paulo",
@@ -94,9 +96,10 @@ async function sendWithAvatar(
 
 export async function announceJoin(ev: Extract<LogEvent, { type: "connect" }>): Promise<void> {
   const steam = describeSteamId(ev.steamId);
-  const [profile, ipCountry] = await Promise.all([
+  const [profile, ipCountry, signals] = await Promise.all([
     getSteamProfile(steam.steam64),
     getCountryByIp(ev.ip),
+    getSteamSignals(steam.steam64),
   ]);
   // País da Steam vale só para contas Steam de verdade (STEAM_0/1); os
   // clientes non-Steam do ReUnion (STEAM_2/3) não têm perfil, então o país
@@ -115,6 +118,20 @@ export async function announceJoin(ev: Extract<LogEvent, { type: "connect" }>): 
     currentCountLine(),
   ];
   await sendWithAvatar(profile?.avatar ?? null, header, lines);
+
+  if (config.trustAlertEnabled) {
+    const trust = evaluateTrust({
+      origin: steam.origin,
+      signals,
+      previousNamesCount: history.previousNames.length,
+      visits: history.visits,
+    });
+    if (shouldSendTrustAlert(ev.steamId, trust)) {
+      sendTelegram(
+        `🛡️ <b>Alerta de Confiança</b> · ${escapeHtml(ev.name)} (<code>${escapeHtml(ev.steamId)}</code>)\nScore: ${trust.score}/100 · ${trust.reasons.map(escapeHtml).join(" · ")}`,
+      );
+    }
+  }
 }
 
 export function historyLines(history: PlayerHistory): string[] {

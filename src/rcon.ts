@@ -35,8 +35,7 @@ const ROUND_RE =
 const COUNTS_RE = /"zombies":(\d+),"humans":(\d+)/;
 const EVENT_RE = /\{"kind":"([^"]*)","message":"([^"]*)","t":(\d+)\}/g;
 
-export async function getSnapshot(): Promise<Snapshot | null> {
-  const raw = await runRconCommand("zp_telemetry_snapshot");
+export function parseSnapshotReply(raw: string): Snapshot | null {
   const rm = raw.match(ROUND_RE);
   const cm = raw.match(COUNTS_RE);
   if (!rm || !cm) return null;
@@ -58,9 +57,11 @@ export async function getSnapshot(): Promise<Snapshot | null> {
   };
 }
 
-export async function getPositions(): Promise<RadarPlayer[]> {
-  const raw = await runRconCommand("zp_telemetry_positions");
+export async function getSnapshot(): Promise<Snapshot | null> {
+  return parseSnapshotReply(await runRconCommand("zp_telemetry_snapshot"));
+}
 
+export function parsePositionsReply(raw: string): RadarPlayer[] {
   const players: RadarPlayer[] = [];
   for (const m of raw.matchAll(PLAYER_RE)) {
     players.push({
@@ -71,6 +72,10 @@ export async function getPositions(): Promise<RadarPlayer[]> {
     });
   }
   return players;
+}
+
+export async function getPositions(): Promise<RadarPlayer[]> {
+  return parsePositionsReply(await runRconCommand("zp_telemetry_positions"));
 }
 
 export async function runRconCommand(cmd: string): Promise<string> {

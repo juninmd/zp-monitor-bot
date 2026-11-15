@@ -1,6 +1,6 @@
 import { GameDig, type QueryResult } from "gamedig";
 import { samplePeakHumans } from "./metrics";
-import type { Snapshot } from "./rcon";
+import { parsePositionsReply, parseSnapshotReply, type RadarPlayer, type Snapshot } from "./rcon";
 import { parseStatus, type StatusClient, splitByStatus } from "./statusParser";
 
 interface MonitorPlayer {
@@ -9,6 +9,7 @@ interface MonitorPlayer {
   time: number | null;
   /** Ping em ms, só quando a tabela `status` do RCON está disponível. */
   ping?: number | null;
+  steamId?: string | null;
 }
 
 // A `status` table older than this is ignored: bots churn with the quota, and
@@ -62,6 +63,10 @@ interface MonitorState {
     humans: number;
     events: Snapshot["events"];
   };
+  radar: {
+    players: RadarPlayer[];
+    lastUpdate: number | null;
+  };
   history: {
     t: number[];
     players: number[];
@@ -82,6 +87,17 @@ export interface MonitorOptions {
 
 export type RconRunner = (command: string) => Promise<string>;
 
+export const monitorCounters = {
+  a2sErrors: 0,
+  rconErrors: 0,
+  telemetryErrors: 0,
+  wsClients: 0,
+};
+
+export function setWsClientCount(count: number): void {
+  monitorCounters.wsClients = Math.max(0, count);
+}
+
 export const monitorState: MonitorState = {
   connection: { online: false, lastError: null, lastUpdate: null },
   info: null,
@@ -96,8 +112,26 @@ export const monitorState: MonitorState = {
     humans: 0,
     events: [],
   },
+  radar: {
+    players: [],
+    lastUpdate: null,
+  },
   history: { t: [], players: [], zombies: [], humans: [], ping: [] },
 };
+
+export function seedMonitorHistory(
+  samples: Array<{ t: number; humans: number; zombies: number }>,
+  cap = 720,
+): void {
+  const sliced = samples.slice(-cap);
+  monitorState.history = {
+    t: sliced.map((s) => s.t),
+    players: sliced.map((s) => s.humans),
+    zombies: sliced.map((s) => s.zombies),
+    humans: sliced.map((s) => s.humans),
+    ping: sliced.map(() => null),
+  };
+}
 
 // "CPU   In    Out   Uptime  Users   FPS    Players"
 // "17.50  0.00  0.00      45     12  786.24        0"
@@ -198,7 +232,7 @@ function resolvePlayers(result: QueryResult): {
     const players = split.humans.map((player) => {
       const at = pool.findIndex((client) => client.name === player.name);
       const client = at >= 0 ? pool.splice(at, 1)[0] : undefined;
-      return client ? { ...player, ping: client.ping } : player;
+      return client ? { ...player, ping: client.ping, steamId: client.uniqueId } : player;
     });
     return { players, bots: split.bots.length, source: "status" };
   }
@@ -255,6 +289,7 @@ async function pollA2s(options: MonitorOptions, broadcast: () => void): Promise<
     lastOnline = true;
     lastMap = result.map;
   } catch (error) {
+    monitorCounters.a2sErrors += 1;
     monitorState.connection.online = false;
     monitorState.connection.lastError = errorMessage(error);
     if (lastOnline !== false) {
@@ -274,6 +309,7 @@ async function pollRcon(runRcon: RconRunner, broadcast: () => void): Promise<voi
     lastStatus = { clients: parseStatus(await runRcon("status")), at: Date.now() };
     monitorState.rcon.lastError = null;
   } catch (error) {
+    monitorCounters.rconErrors += 1;
     monitorState.rcon.lastError = errorMessage(error);
   } finally {
     monitorState.rcon.lastUpdate = Date.now();
@@ -284,9 +320,8 @@ async function pollRcon(runRcon: RconRunner, broadcast: () => void): Promise<voi
 async function pollTelemetry(runRcon: RconRunner, broadcast: () => void): Promise<void> {
   try {
     const reply = await runRcon("zp_telemetry_snapshot");
-    const jsonStart = reply.indexOf("{");
-    if (jsonStart < 0) throw new Error("zp_telemetry_snapshot sem JSON");
-    const snapshot = JSON.parse(reply.slice(jsonStart)) as Snapshot;
+    const snapshot = parseSnapshotReply(reply);
+    if (!snapshot) throw new Error("zp_telemetry_snapshot sem JSON");
     monitorState.telemetry.connected = true;
     monitorState.telemetry.lastError = null;
     monitorState.telemetry.round = snapshot.round;
@@ -300,7 +335,17 @@ async function pollTelemetry(runRcon: RconRunner, broadcast: () => void): Promis
       0,
       100,
     );
+    if (monitorCounters.wsClients > 0) {
+      try {
+        const posRaw = await runRcon("zp_telemetry_positions");
+        monitorState.radar.players = parsePositionsReply(posRaw);
+        monitorState.radar.lastUpdate = Date.now();
+      } catch {
+        // Mantém última leitura de radar sem derrubar o snapshot.
+      }
+    }
   } catch (error) {
+    monitorCounters.telemetryErrors += 1;
     monitorState.telemetry.connected = false;
     monitorState.telemetry.lastError = errorMessage(error);
   } finally {
