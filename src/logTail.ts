@@ -2,6 +2,15 @@ import { config } from "./config";
 import { type LogEvent, parseLine } from "./logParser";
 
 const RECONNECT_DELAY_MS = 5000;
+const MAX_RECONNECT_DELAY_MS = 60_000;
+// Um reconnect que morre em menos que isso e sinal de problema (pod ausente,
+// erro de API, stream travado) e nao de stream saudavel que caiu de verdade.
+const HEALTHY_STREAM_MS = 30_000;
+// Guarda contra o stream que "resolve" leituras vazias em loop: o corpo HTTP
+// do `logs?follow=true` as vezes para de entregar bytes sem sinalizar done, o
+// loop nunca bloqueia e a CPU fica cravada em ~1 core sem escrever log nenhum.
+// Medido em producao: pod com 0,98 core constante por horas e zero linhas.
+const EMPTY_READ_LIMIT = 500;
 const TIMESTAMP_LINE_RE = /^(\S+) (.*)$/;
 
 // Marca d'água do timestamp (RFC3339Nano, do próprio `--timestamps`) da
@@ -18,16 +27,27 @@ function stripTimestamp(raw: string): { at: string | null; line: string } {
   return { at: m[1] ?? null, line: m[2] ?? "" };
 }
 
-async function consumeStream(
+export async function consumeStream(
   stream: ReadableStream<Uint8Array>,
   onEvent: (event: LogEvent) => void,
 ): Promise<void> {
   const reader = stream.getReader();
   const decoder = new TextDecoder();
   let buffer = "";
+  let emptyReads = 0;
   while (true) {
     const { value, done } = await reader.read();
     if (done) break;
+    if (!value || value.byteLength === 0) {
+      // Chunk vazio nao e progresso: conta e aborta depois do limite para o
+      // loop externo reconectar em vez de girar a CPU.
+      emptyReads += 1;
+      if (emptyReads >= EMPTY_READ_LIMIT) {
+        throw new Error(`stream ocioso: ${emptyReads} leituras vazias seguidas`);
+      }
+      continue;
+    }
+    emptyReads = 0;
     buffer += decoder.decode(value, { stream: true });
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
@@ -125,7 +145,9 @@ async function runKubernetesApiOnce(onEvent: (event: LogEvent) => void): Promise
 }
 
 export async function startLogTail(onEvent: (e: LogEvent) => void): Promise<void> {
+  let delay = RECONNECT_DELAY_MS;
   while (true) {
+    const startedAt = Date.now();
     try {
       if (process.env.KUBERNETES_SERVICE_HOST) {
         await runKubernetesApiOnce(onEvent);
@@ -135,6 +157,13 @@ export async function startLogTail(onEvent: (e: LogEvent) => void): Promise<void
     } catch (err) {
       console.error("[logTail] error", err);
     }
-    await new Promise((r) => setTimeout(r, RECONNECT_DELAY_MS));
+    // Stream saudavel que cai volta rapido; reconexao que morre em segundos
+    // (pod ausente, erro de API, stream travado) sobe o delay ate 60s.
+    const lasted = Date.now() - startedAt;
+    delay =
+      lasted >= HEALTHY_STREAM_MS
+        ? RECONNECT_DELAY_MS
+        : Math.min(delay * 2, MAX_RECONNECT_DELAY_MS);
+    await new Promise((r) => setTimeout(r, delay));
   }
 }
