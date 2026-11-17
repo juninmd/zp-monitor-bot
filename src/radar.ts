@@ -1,3 +1,4 @@
+import "./fonts";
 import { createCanvas } from "@napi-rs/canvas";
 import type { RadarPlayer } from "./rcon";
 

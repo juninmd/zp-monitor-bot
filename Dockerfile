@@ -12,6 +12,7 @@ COPY --from=dependencies /app/node_modules ./node_modules
 COPY package.json bun.lock ./
 COPY src ./src
 COPY public ./public
+COPY assets ./assets
 COPY knowledge ./knowledge
 USER bun
 EXPOSE 8091
