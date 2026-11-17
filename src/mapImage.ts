@@ -1,3 +1,4 @@
+import "./fonts";
 import { createCanvas, type SKRSContext2D } from "@napi-rs/canvas";
 import { type DecodedImage, decodeImage } from "./imageDecode";
 import { type Overview, parseOverview, projectToPixels } from "./overview";

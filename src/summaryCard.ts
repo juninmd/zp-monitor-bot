@@ -4,6 +4,7 @@
  * dashboard (`/api/summary.png`).
  */
 
+import "./fonts";
 import { createCanvas, loadImage, type SKRSContext2D } from "@napi-rs/canvas";
 import { getMetrics, getTopFraggerSteamId } from "./metrics";
 import { loadPeakRecord, loadTopMapToday } from "./metricsQueries";
