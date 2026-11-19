@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { describeSteamId, formatDuration } from "../src/steamId";
+import { Elysia } from "elysia";
+import { cleanSteamIdParam, describeSteamId, formatDuration } from "../src/steamId";
 
 test("converte authid Steam real em SteamID64 + link de perfil", () => {
   const info = describeSteamId("STEAM_0:1:36728267");
@@ -29,4 +30,20 @@ test("formata duração", () => {
   expect(formatDuration(45)).toBe("45s");
   expect(formatDuration(151)).toBe("2min 31s");
   expect(formatDuration(3731)).toBe("1h 2min");
+});
+
+test("cleanSteamIdParam rejeita vazio e BOT e limita o tamanho", () => {
+  expect(cleanSteamIdParam("")).toBeNull();
+  expect(cleanSteamIdParam("BOT")).toBeNull();
+  expect(cleanSteamIdParam("STEAM_0:1:36728267")).toBe("STEAM_0:1:36728267");
+  expect(cleanSteamIdParam("x".repeat(100))).toHaveLength(64);
+});
+
+test("o Elysia já decodifica :steamId; um segundo decodeURIComponent quebraria com % solto", async () => {
+  const app = new Elysia().get("/p/:steamId", ({ params }) => cleanSteamIdParam(params.steamId));
+  const get = async (path: string) =>
+    (await app.handle(new Request(`http://localhost${path}`))).text();
+  expect(await get("/p/STEAM_0%3A1%3A5")).toBe("STEAM_0:1:5");
+  expect(await get("/p/100%25")).toBe("100%");
+  expect(() => decodeURIComponent("100%")).toThrow(URIError);
 });
