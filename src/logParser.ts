@@ -25,15 +25,24 @@ export type LogEvent =
       weapon: string;
     };
 
-const CONNECT_RE = /"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><>" connected, address "([^"]*)"/;
-const VALIDATED_RE = /"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><>" STEAM USERID validated/;
-const ENTERED_RE = /"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" entered the game/;
-const DISCONNECT_RE =
-  /"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" disconnected(?: \(reason "([^"]*)"\))?/;
-const SAY_RE = /"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" (say|say_team) "(.*)"/;
+// Ancorado no início (com o prefixo "L mm/dd/yyyy - hh:mm:ss: " opcional): sem isso o
+// texto de um `say` com aspas forjava connect/disconnect/entered de outro jogador.
+const P = String.raw`^(?:L \d{2}/\d{2}/\d{4} - \d{2}:\d{2}:\d{2}: )?`;
+const re = (body: string) => new RegExp(P + body);
+
+const CONNECT_RE = re(
+  String.raw`"([^"]+?)<(\d+)><(STEAM_[^>]+|BOT)><>" connected, address "([^"]*)"`,
+);
+const VALIDATED_RE = re(String.raw`"([^"]+?)<(\d+)><(STEAM_[^>]+|BOT)><>" STEAM USERID validated`);
+const ENTERED_RE = re(String.raw`"([^"]+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" entered the game`);
+const DISCONNECT_RE = re(
+  String.raw`"([^"]+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" disconnected(?: \(reason "([^"]*)"\))?`,
+);
+const SAY_RE = re(String.raw`"([^"]+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" (say|say_team) "(.*)"`);
 // "Fulano<7><STEAM_0:0:123><CT>" [-258 1340 18] killed "Cicrano<8><STEAM_0:0:456><T>" [100 200 30] with "knife"
-const KILL_RE =
-  /^"(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\] killed "(.+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\] with "([^"]*)"/;
+const KILL_RE = re(
+  String.raw`"([^"]+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\] killed "([^"]+?)<(\d+)><(STEAM_[^>]+|BOT)><([^>]*)>" \[\s*(-?\d+)\s+(-?\d+)\s+(-?\d+)\s*\] with "([^"]*)"`,
+);
 
 export function parseLine(line: string): LogEvent | null {
   let m = line.match(CONNECT_RE);

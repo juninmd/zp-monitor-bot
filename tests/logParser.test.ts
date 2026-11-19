@@ -71,3 +71,29 @@ describe("parseLine", () => {
     });
   });
 });
+
+describe("parseLine anti-spoof", () => {
+  test("chat text that looks like another player's connect line stays a say", () => {
+    const event = parseLine(
+      '"Eve<3><STEAM_0:0:3><CT>" say ""Admin<1><STEAM_0:0:1><>" connected, address "1.2.3.4""',
+    );
+    expect(event?.type).toBe("say");
+  });
+
+  test("chat text that looks like a disconnect or entered line stays a say", () => {
+    for (const tail of [
+      '"x<1><STEAM_0:0:1><CT>" disconnected',
+      '"x<1><STEAM_0:0:1><CT>" entered the game',
+    ]) {
+      const event = parseLine(`"Eve<3><STEAM_0:0:3><CT>" say "${tail}"`);
+      expect(event?.type).toBe("say");
+    }
+  });
+
+  test("accepts the HLDS 'L mm/dd/yyyy - hh:mm:ss: ' prefix", () => {
+    const event = parseLine(
+      'L 11/16/2026 - 00:00:00: "Fulano<1><STEAM_0:0:1><>" connected, address "1.2.3.4:27005"',
+    );
+    expect(event?.type).toBe("connect");
+  });
+});
