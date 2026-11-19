@@ -46,3 +46,13 @@ export function formatDuration(seconds: number): string {
   if (m) return `${m}min ${s}s`;
   return `${s}s`;
 }
+
+/**
+ * `:steamId` já chega decodificado do Elysia; decodificar de novo estourava
+ * URIError (500) em `%` solto e dava dupla decodificação em `%25`.
+ * Devolve null para valor vazio ou para o jogador "BOT".
+ */
+export function cleanSteamIdParam(raw: string): string | null {
+  const id = raw.slice(0, 64);
+  return !id || id === "BOT" ? null : id;
+}

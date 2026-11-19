@@ -23,7 +23,7 @@ import { syncPodKnowledge } from "./podKnowledge";
 import { formatPrometheusMetrics } from "./prometheus";
 import { runRconCommand } from "./rcon";
 import { getStats } from "./state";
-import { describeSteamId } from "./steamId";
+import { cleanSteamIdParam, describeSteamId } from "./steamId";
 import { getSteamProfile } from "./steamProfile";
 import { getSteamSignals } from "./steamSignals";
 import { buildTodaySummaryData, renderSummaryCard } from "./summaryCard";
@@ -164,8 +164,8 @@ const app = new Elysia()
     });
   })
   .get("/api/player/:steamId", async ({ params, set }) => {
-    const steamId = decodeURIComponent(params.steamId).slice(0, 64);
-    if (!steamId || steamId === "BOT") {
+    const steamId = cleanSteamIdParam(params.steamId);
+    if (!steamId) {
       set.status = 400;
       return { error: "invalid steamId" };
     }
