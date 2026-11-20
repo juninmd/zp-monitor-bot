@@ -694,13 +694,21 @@
       }).catch(() => {});
     }
 
-    fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
+    // Without this the header keeps the last server status (or "conectando…") while the panel itself is unreachable.
+    function panelDown(msg) {
+      el('dot').classList.remove('online');
+      el('status').textContent = msg;
+    }
+    fetch('/api/state')
+      .then(r => { if (!r.ok) throw new Error(String(r.status)); return r.json(); })
+      .then(render)
+      .catch(() => panelDown('painel indisponível · tentando reconectar…'));
     loadToday();
     setInterval(loadToday, 30000);
     function connect() {
       const ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws`);
       ws.onmessage = e => { const p = JSON.parse(e.data); if (p.type === 'state') render(p.data); };
-      ws.onclose = () => setTimeout(connect, 2000);
+      ws.onclose = () => { panelDown('conexão com o painel perdida · reconectando…'); setTimeout(connect, 2000); };
     }
     connect();
   </script>
