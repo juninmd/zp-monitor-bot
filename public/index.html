@@ -491,12 +491,16 @@
         : 'Aguardando telemetria de posições do servidor…';
     }
 
+    let playerRequest = 0;
     async function inspectPlayer(steamId) {
       if (!steamId) return;
+      // A slower answer for a player clicked earlier must not overwrite the one now open.
+      const request = ++playerRequest;
       el('playerModalBody').innerHTML = '<div class="muted">Consultando perfil, Steam e rivalidades…</div>';
       openModal('playerModal');
       try {
         const d = await fetch(`/api/player/${encodeURIComponent(steamId)}`).then(r => r.json());
+        if (request !== playerRequest) return;
         const trustClass = d.trust.level === 'trusted' ? 'ok' : d.trust.level === 'high_risk' ? 'danger' : d.trust.level === 'watch' ? 'warn' : 'info';
         const kd = (d.summary.rank7d.kills / Math.max(1, d.summary.rank7d.deaths)).toFixed(2);
         const avatarHtml = d.avatarUrl ? `<img class="avatar" src="${escapeHtml(d.avatarUrl)}" alt="Avatar">` : `<div class="avatar"></div>`;
@@ -521,6 +525,7 @@
           ${d.summary.topWeapons7d.length ? `<div class="sub" style="margin-top:6px">Armas favoritas (7d): ${d.summary.topWeapons7d.map(w => `${escapeHtml(w.weapon)} (${w.kills})`).join(' · ')}</div>` : ''}
         `;
       } catch {
+        if (request !== playerRequest) return;
         el('playerModalBody').innerHTML = '<div class="z">Erro ao carregar dados do jogador.</div>';
       }
     }
