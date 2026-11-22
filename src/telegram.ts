@@ -33,37 +33,80 @@ let drainingPhotos = false;
 const escapeHtml = (s: string): string =>
   s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 
+const MAX_ATTEMPTS = 3;
+const MAX_RETRY_AFTER_S = 60;
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** Bot API 429 bodies carry parameters.retry_after in seconds. */
+function retryAfterMs(body: string): number {
+  try {
+    const seconds = Number(JSON.parse(body)?.parameters?.retry_after);
+    if (Number.isFinite(seconds) && seconds >= 0) {
+      return Math.min(seconds, MAX_RETRY_AFTER_S) * 1000;
+    }
+  } catch {
+    // not JSON: fall back to a short wait
+  }
+  return 1000;
+}
+
+// Bounded retry so a burst (429) doesn't silently drop alerts nor stall the queue forever.
+async function postWithRetry(label: string, doFetch: () => Promise<Response>): Promise<void> {
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await doFetch();
+      if (res.ok) return;
+      const body = await res.text();
+      if (res.status === 429 && attempt < MAX_ATTEMPTS) {
+        await sleep(retryAfterMs(body));
+        continue;
+      }
+      console.error(`[telegram] ${label} failed`, res.status, body);
+    } catch (err) {
+      console.error(`[telegram] ${label} error`, err);
+    }
+    return;
+  }
+}
+
 async function drain(): Promise<void> {
   if (draining) return;
   draining = true;
   while (queue.length > 0) {
     const item = queue.shift();
     if (!item) break;
-    try {
-      const res = await fetch(
-        `https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`,
-        {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            chat_id: item.chatId,
-            text: item.text,
-            ...(item.html ? { parse_mode: "HTML" } : {}),
-            ...(item.replyMarkup ? { reply_markup: item.replyMarkup } : {}),
-            disable_web_page_preview: true,
-          }),
-        },
-      );
-      if (!res.ok) {
-        console.error("[telegram] send failed", res.status, await res.text());
-      }
-    } catch (err) {
-      console.error("[telegram] send error", err);
-    }
+    await postWithRetry("send", () =>
+      fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendMessage`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          chat_id: item.chatId,
+          text: item.text,
+          ...(item.html ? { parse_mode: "HTML" } : {}),
+          ...(item.replyMarkup ? { reply_markup: item.replyMarkup } : {}),
+          disable_web_page_preview: true,
+        }),
+      }),
+    );
     item.resolve();
-    await new Promise((r) => setTimeout(r, MIN_INTERVAL_MS));
+    await sleep(MIN_INTERVAL_MS);
   }
   draining = false;
+}
+
+function photoForm(item: PhotoItem): FormData {
+  const form = new FormData();
+  form.append("chat_id", item.chatId);
+  if (item.caption) {
+    form.append("caption", item.caption);
+    form.append("parse_mode", "HTML");
+  }
+  if (item.replyMarkup) {
+    form.append("reply_markup", JSON.stringify(item.replyMarkup));
+  }
+  form.append("photo", new Blob([item.photo], { type: "image/png" }), "snapshot.png");
+  return form;
 }
 
 async function drainPhotos(): Promise<void> {
@@ -72,29 +115,14 @@ async function drainPhotos(): Promise<void> {
   while (photoQueue.length > 0) {
     const item = photoQueue.shift();
     if (!item) break;
-    const form = new FormData();
-    form.append("chat_id", item.chatId);
-    if (item.caption) {
-      form.append("caption", item.caption);
-      form.append("parse_mode", "HTML");
-    }
-    if (item.replyMarkup) {
-      form.append("reply_markup", JSON.stringify(item.replyMarkup));
-    }
-    form.append("photo", new Blob([item.photo], { type: "image/png" }), "snapshot.png");
-    try {
-      const res = await fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendPhoto`, {
+    await postWithRetry("sendPhoto", () =>
+      fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendPhoto`, {
         method: "POST",
-        body: form,
-      });
-      if (!res.ok) {
-        console.error("[telegram] sendPhoto failed", res.status, await res.text());
-      }
-    } catch (err) {
-      console.error("[telegram] sendPhoto error", err);
-    }
+        body: photoForm(item),
+      }),
+    );
     item.resolve();
-    await new Promise((r) => setTimeout(r, MIN_INTERVAL_MS));
+    await sleep(MIN_INTERVAL_MS);
   }
   drainingPhotos = false;
 }
