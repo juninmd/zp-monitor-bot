@@ -4,8 +4,9 @@ const required = (name: string): string => {
   return v;
 };
 
-const positiveNumber = (name: string, fallback: string): number => {
-  const value = Number(process.env[name] ?? fallback);
+export const positiveNumber = (name: string, fallback: string): number => {
+  const raw = process.env[name]?.trim();
+  const value = Number(raw || fallback);
   if (!Number.isFinite(value) || value <= 0) {
     throw new Error(`${name} must be a positive number`);
   }
