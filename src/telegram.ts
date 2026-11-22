@@ -35,6 +35,8 @@ const escapeHtml = (s: string): string =>
 
 const MAX_ATTEMPTS = 3;
 const MAX_RETRY_AFTER_S = 60;
+// Without a deadline a stalled connection never settles and blocks the whole queue.
+const SEND_TIMEOUT_MS = 10_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
@@ -87,6 +89,7 @@ async function drain(): Promise<void> {
           ...(item.replyMarkup ? { reply_markup: item.replyMarkup } : {}),
           disable_web_page_preview: true,
         }),
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       }),
     );
     item.resolve();
@@ -119,6 +122,7 @@ async function drainPhotos(): Promise<void> {
       fetch(`https://api.telegram.org/bot${config.telegramBotToken}/sendPhoto`, {
         method: "POST",
         body: photoForm(item),
+        signal: AbortSignal.timeout(SEND_TIMEOUT_MS),
       }),
     );
     item.resolve();
